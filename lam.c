@@ -42,7 +42,7 @@ union term {
 };
 
 
-FILE *dbg, *src, *dst;
+FILE *dbg;
 
 void skip_spaces(FILE *src) {
     int c;

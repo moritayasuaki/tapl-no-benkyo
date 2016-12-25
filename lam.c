@@ -229,7 +229,7 @@ void print_var(FILE *dst, FILE *src, struct var *v, struct ctx *ctx)
     fsetpos(src, &ctx->pos);
     if (!get_id(src, buf))
         error("error");
-    fprintf(dst, "%s[%d]", buf, v->idx);
+    fprintf(dst, "%s", buf);
 }
 
 void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
@@ -329,7 +329,6 @@ union term *subst(union term *t, int j, int c, union term *s)
         return t;
     case tvar:
         if (t->v.idx == j+c) {
-            debug("beta kanyaku!\n");
             union term *ss = copy(s);
             return shift(ss, c, 0); /* ap->arg and top ap/ab is eliminated */
         }

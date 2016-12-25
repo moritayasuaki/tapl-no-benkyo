@@ -163,7 +163,7 @@ struct var *parse_var(FILE *src, struct ctx *ctx)
     struct ctx *hit = find_ctx(ctx, src, buf);
     fsetpos(src, &save);
     if (!hit)
-        error("undefined");
+        error("undefined\n");
     struct var *v = malloc(sizeof(union term));
     v->tag = tvar;
     v->len = ctx->len;
@@ -179,7 +179,7 @@ union term *parse_fun(FILE *src, struct ctx *ctx)
         skip_spaces(src);
         f = parse_term(src, ctx);
         if (!match_str(src, ")"))
-            error("unmatch paren");
+            error("unmatch paren\n");
         return f;
     }
     f = (union term *)parse_abs(src, ctx);
@@ -193,7 +193,7 @@ union term *parse_term(FILE *src, struct ctx *ctx)
     union term *f;
     f = parse_fun(src, ctx);
     if (!f)
-        error("fun");
+        error("fun\n");
     while (1) {
         union term *a = parse_fun(src, ctx);
         if (!a)
@@ -227,7 +227,7 @@ void print_var(FILE *dst, FILE *src, struct var *v, struct ctx *ctx)
         ctx = ctx->next;
     fsetpos(src, &ctx->pos);
     if (!get_id(src, buf))
-        error("error");
+        error("error\n");
     fprintf(dst, "%s", buf);
 }
 
@@ -236,7 +236,7 @@ void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
     char buf[32];
     fsetpos(src, &ab->pos);
     if (!get_id(src, buf))
-        error("error");
+        error("error\n");
     fprintf(dst, "(lambda %s.", buf);
     ctx = push_ctx(ctx, ab->pos);
     print_term(dst, src, ab->exp, ctx);
@@ -295,7 +295,7 @@ union term *shift(union term *t, int d, int c)
             t->v.idx += d;
         return t;
     }
-    error("invalid term");
+    error("invalid term\n");
 }
 
 union term *copy(union term *t)
@@ -313,7 +313,7 @@ union term *copy(union term *t)
     case tvar:
         return d;
     }
-    error("invalid term");
+    error("invalid term\n");
 }
 
 union term *subst(union term *t, int j, int c, union term *s)
@@ -333,7 +333,7 @@ union term *subst(union term *t, int j, int c, union term *s)
         }
         return t;
     }
-    error("invalid term");
+    error("invalid term\n");
 }
 
 union term *subst1(union term *t, union term *s)

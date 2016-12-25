@@ -232,7 +232,6 @@ int main(int argc, char **argv)
     /* eval term */
     t = eval(t);
     /* print_term normal form */
-    print_term(stdout, t);
-    putchar('\n');
+    print(stdout, t);
     return 0;
 }

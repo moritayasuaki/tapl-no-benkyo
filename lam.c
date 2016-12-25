@@ -388,6 +388,5 @@ int main(int argc, char **argv)
     union term *t = parse(tmp);
     t = eval(t);
     print(stdout, tmp, t);
-    fprintf(stdout, "\n");
     return 0;
 }

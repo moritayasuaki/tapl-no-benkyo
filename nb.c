@@ -18,16 +18,12 @@ struct term {
     struct term *sub[3];
 };
 
-int peek(FILE *in) {
-    int c = fgetc(in);
-    ungetc(c, in);
-    return c;
-}
-
-int match(FILE *in, char *str) {
+int match(FILE *in, char *str)
+{
+    int c;
     fpos_t save;
-    while(isspace(peek(in)))
-        fgetc(in);
+    while(isspace(c = fgetc(in)));
+    ungetc(c, in);
     fgetpos(in, &save);
     while (*str)
         if (fgetc(in) != *str++)
@@ -218,20 +214,22 @@ struct term *eval(struct term *t)
     return t;
 }
 
-int main(int argc, char **argv)
+FILE *read(void)
 {
-    int c;
-    struct term *t;
     FILE *tmp = tmpfile();
-    dbg = stderr;
-    /* read input */
+    int c;
     while ((c = getchar()) !=  EOF)
         fputc(c, tmp);
     rewind(tmp);
-    t = parse(tmp);
-    /* eval term */
+    return tmp;
+}
+
+int main(int argc, char **argv)
+{
+    dbg = stderr;
+    FILE *tmp = read();
+    struct term *t = parse(tmp);
     t = eval(t);
-    /* print_term normal form */
     print(stdout, t);
     return 0;
 }

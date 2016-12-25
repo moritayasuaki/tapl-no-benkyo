@@ -3,6 +3,8 @@
 #include <string.h>
 #include <setjmp.h>
 #include <ctype.h>
+
+FILE *dbg;
 #define error(...) (fprintf(stderr, __VA_ARGS__), exit(1))
 #define debug(...) (dbg && fprintf(dbg, __VA_ARGS__))
 
@@ -40,9 +42,6 @@ union term {
     struct abs ab;
     struct app ap;
 };
-
-
-FILE *dbg;
 
 void skip_spaces(FILE *src) {
     int c;
@@ -98,6 +97,7 @@ char *get_id(FILE *src, char *id)
     *p = '\0';
     return id;
 }
+
 union term *parse_term(FILE *src, struct ctx *ctx);
 
 struct ctx *find_ctx(struct ctx *ctx, FILE *src, char *id)
@@ -216,7 +216,6 @@ union term *parse(FILE *src)
     };
     return parse_term(src, &root);
 }
-
 
 void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx);
 
@@ -375,15 +374,20 @@ union term *eval(union term *t)
     return t;
 }
 
-
-int main(int argc, char **argv)
+FILE *read(void)
 {
-    dbg = stderr;
     FILE *tmp = tmpfile();
     int c;
     while ((c = getchar()) !=  EOF)
         fputc(c, tmp);
     rewind(tmp);
+    return tmp;
+}
+
+int main(int argc, char **argv)
+{
+    dbg = stderr;
+    FILE *tmp = read();
     union term *t = parse(tmp);
     t = eval(t);
     print(stdout, tmp, t);

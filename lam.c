@@ -160,14 +160,14 @@ struct var *parse_var(FILE *src, struct ctx *ctx)
     if (!get_id(src, buf))
         return NULL;
     fgetpos(src, &save);
-    struct ctx *def = find_ctx(ctx, src, buf);
+    struct ctx *hit = find_ctx(ctx, src, buf);
     fsetpos(src, &save);
-    if (!def)
+    if (!hit)
         error("undefined");
     struct var *v = malloc(sizeof(union term));
     v->tag = tvar;
     v->len = ctx->len;
-    v->idx = ctx->len - def->len;
+    v->idx = ctx->len - hit->len;
     return v;
 }
 

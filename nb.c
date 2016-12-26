@@ -226,7 +226,9 @@ FILE *read(void)
 
 int main(int argc, char **argv)
 {
+#ifndef NDEBUG
     dbg = stderr;
+#endif
     FILE *tmp = read();
     struct term *t = parse(tmp);
     t = eval(t);

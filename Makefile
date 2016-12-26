@@ -1,9 +1,8 @@
+CPPFLAGS+=-DNDEBUG
 target = nb lam
-all: $(target)
+all: $(target) test
 test: $(target:%=%-test)
-clean:; rm -f $(target)
-%:%.c
-	cc $< -o $@
-
-%-test :%
+clean:
+	rm -f $(target)
+%-test:%
 	./$@.sh

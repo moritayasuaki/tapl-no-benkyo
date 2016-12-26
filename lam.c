@@ -92,7 +92,7 @@ char *get_id(FILE *src, char *id)
     do {
         *p++ = c;
         c = fgetc(src);
-    } while (isalnum(c) || c == '_');
+    } while (p - id < 32 && (isalnum(c) || c == '_'));
     ungetc(c, src);
     *p = '\0';
     return id;
@@ -138,11 +138,11 @@ struct abs *parse_abs(FILE *src, struct ctx *ctx)
         error("invalid identifier");
     skip_spaces(src);
     if (!match_str(src, "."))
-        error(". is expected");
+        error(". is expected\n");
     ctx = push_ctx(ctx, p);
     union term *e = parse_term(src, ctx);
     if (!e)
-        error("exp parse error");
+        error("parse error\n");
     struct abs *ab = malloc(sizeof(union term));
     ab->tag = tabs;
     ab->pos = p;
@@ -163,7 +163,7 @@ struct var *parse_var(FILE *src, struct ctx *ctx)
     struct ctx *hit = find_ctx(ctx, src, buf);
     fsetpos(src, &save);
     if (!hit)
-        error("undefined\n");
+        error("undefined identifier %s\n", buf);
     struct var *v = malloc(sizeof(union term));
     v->tag = tvar;
     v->len = ctx->len;
@@ -179,7 +179,7 @@ union term *parse_fun(FILE *src, struct ctx *ctx)
         skip_spaces(src);
         f = parse_term(src, ctx);
         if (!match_str(src, ")"))
-            error("unmatch paren\n");
+            error("unmatched paren\n");
         return f;
     }
     f = (union term *)parse_abs(src, ctx);
@@ -193,7 +193,7 @@ union term *parse_term(FILE *src, struct ctx *ctx)
     union term *f;
     f = parse_fun(src, ctx);
     if (!f)
-        error("fun\n");
+        error("parse error function\n");
     while (1) {
         union term *a = parse_fun(src, ctx);
         if (!a)
@@ -228,7 +228,7 @@ void print_var(FILE *dst, FILE *src, struct var *v, struct ctx *ctx)
     fsetpos(src, &ctx->pos);
     if (!get_id(src, buf))
         error("error\n");
-    fprintf(dst, "%s", buf);
+    fputs(buf, dst);
 }
 
 void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
@@ -237,34 +237,51 @@ void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
     fsetpos(src, &ab->pos);
     if (!get_id(src, buf))
         error("error\n");
-    fprintf(dst, "(lambda %s.", buf);
+    fputs("lambda ", dst);
+    fputs(buf, dst);
+    fputs(".", dst);
     ctx = push_ctx(ctx, ab->pos);
     print_term(dst, src, ab->exp, ctx);
     ctx = pop_ctx(ctx);
-    fprintf(dst, ")");
 }
 
-void print_app(FILE *dst, FILE *src, struct app *ap, struct ctx *ctx)
+void print_fun(FILE *dst, FILE *src, union term *fun, struct ctx *ctx)
 {
-    fprintf(dst, "(");
-    print_term(dst, src, ap->fun, ctx);
-    fprintf(dst, " ");
-    print_term(dst, src, ap->arg, ctx);
-    fprintf(dst, ")");
+    switch (fun->tag) {
+    case tabs:
+        print_abs(dst, src, &fun->ab, ctx);
+        return;
+    case tvar:
+        print_var(dst, src, &fun->v, ctx);
+        return;
+    default:
+        print_term(dst, src, fun, ctx);
+        return;
+    }
 }
 
 void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx)
 {
-    switch (t->tag) {
-    case tapp:
-        print_app(dst, src, &t->ap, ctx);
-        break;
-    case tabs:
-        print_abs(dst, src, &t->ab, ctx);
-        break;
-    case tvar:
-        print_var(dst, src, &t->v, ctx);
-        break;
+    if (t->tag == tapp) {
+        if (t->ap.arg->tag == tapp) {
+            print_fun(dst, src, t->ap.fun, ctx);
+            fputs("(", dst);
+            print_term(dst, src, t->ap.arg, ctx);
+            fputs(")", dst);
+            return;
+        } else if (t->ap.fun->tag == tabs) {
+            fputs("(", dst);
+            print_fun(dst, src, t->ap.fun, ctx);
+            fputs(")", dst);
+            print_term(dst, src, t->ap.arg, ctx);
+        } else {
+            print_fun(dst, src, t->ap.fun, ctx);
+            fputs(" ", dst);
+            print_term(dst, src, t->ap.arg, ctx);
+            return;
+        }
+    } else {
+        print_fun(dst, src, t, ctx);
     }
 }
 

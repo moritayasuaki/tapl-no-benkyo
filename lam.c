@@ -269,8 +269,8 @@ void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx)
             fputs(")", dst);
         } else {
             print_fun(dst, src, t->ap.fun, ctx);
-            fputs(" ", dst);
         }
+        fputs(" ", dst);
         if (t->ap.arg->tag == tapp) {
             fputs("(", dst);
             print_term(dst, src, t->ap.arg, ctx);

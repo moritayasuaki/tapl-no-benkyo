@@ -1,8 +1,8 @@
 CPPFLAGS+=-DNDEBUG
 target = nb lam
-all: $(target) test
-test: $(target:%=%-test)
+test = nb-test lam-test
+all: $(target) $(test)
 clean:
-	rm -f $(target)
-%-test:%
+	rm -f $(target) $(test)
+%-test:
 	./$@.sh

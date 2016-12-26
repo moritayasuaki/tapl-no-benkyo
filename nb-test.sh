@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -e
 res=`mktemp`
 
 # test case 1 

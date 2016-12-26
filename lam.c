@@ -263,22 +263,20 @@ void print_fun(FILE *dst, FILE *src, union term *fun, struct ctx *ctx)
 void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx)
 {
     if (t->tag == tapp) {
-        if (t->ap.arg->tag == tapp) {
-            print_fun(dst, src, t->ap.fun, ctx);
-            fputs("(", dst);
-            print_term(dst, src, t->ap.arg, ctx);
-            fputs(")", dst);
-            return;
-        } else if (t->ap.fun->tag == tabs) {
+        if (t->ap.fun->tag == tabs) {
             fputs("(", dst);
             print_fun(dst, src, t->ap.fun, ctx);
             fputs(")", dst);
-            print_term(dst, src, t->ap.arg, ctx);
         } else {
             print_fun(dst, src, t->ap.fun, ctx);
             fputs(" ", dst);
+        }
+        if (t->ap.arg->tag == tapp) {
+            fputs("(", dst);
             print_term(dst, src, t->ap.arg, ctx);
-            return;
+            fputs(")", dst);
+        } else {
+            print_term(dst, src, t->ap.arg, ctx);
         }
     } else {
         print_fun(dst, src, t, ctx);
@@ -403,7 +401,9 @@ FILE *read(void)
 
 int main(int argc, char **argv)
 {
+#ifndef NDEBUG
     dbg = stderr;
+#endif
     FILE *tmp = read();
     union term *t = parse(tmp);
     t = eval(t);

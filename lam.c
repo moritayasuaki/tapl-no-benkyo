@@ -221,25 +221,33 @@ void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx);
 
 void print_var(FILE *dst, FILE *src, struct var *v, struct ctx *ctx)
 {
-    int i;
-    char buf[32];
-    for (i = 0; i < v->idx; i++)
-        ctx = ctx->next;
-    fsetpos(src, &ctx->pos);
-    if (!get_id(src, buf))
-        error("error\n");
-    fputs(buf, dst);
+    if (src) {
+        int i;
+        char buf[32];
+        for (i = 0; i < v->idx; i++)
+            ctx = ctx->next;
+        fsetpos(src, &ctx->pos);
+        if (!get_id(src, buf))
+            error("error\n");
+        fputs(buf, dst);
+    } else {
+        fprintf(dst, "%d", v->idx);
+    }
 }
 
 void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
 {
     char buf[32];
-    fsetpos(src, &ab->pos);
-    if (!get_id(src, buf))
-        error("error\n");
-    fputs("lambda ", dst);
-    fputs(buf, dst);
-    fputs(".", dst);
+    if (src) {
+        fsetpos(src, &ab->pos);
+        if (!get_id(src, buf))
+            error("error\n");
+        fputs("lambda ", dst);
+        fputs(buf, dst);
+        fputs(".", dst);
+    } else {
+        fputs("lambda.", dst);
+    }
     ctx = push_ctx(ctx, ab->pos);
     print_term(dst, src, ab->exp, ctx);
     ctx = pop_ctx(ctx);
@@ -300,9 +308,7 @@ union term *shift(union term *t, int d, int c)
     switch (t->tag) {
     case tapp:
         t->ap.fun = shift(t->ap.fun, d, c);
-        t->ap.arg = shift(t->ap.arg, d, c);
-        return t;
-    case tabs:
+        t->ap.arg = shift(t->ap.arg, d, c); return t; case tabs:
         t->ab.exp = shift(t->ab.exp, d, c+1);
         return t;
     case tvar:
@@ -369,23 +375,31 @@ union term *eval1(union term *t, jmp_buf jb)
     if (t->tag == tapp) {
         struct app *ap = &t->ap;
         if (ap->fun->tag == tabs && isval(ap->arg)) {
+            debug(" -> E-APPABS");
             return subst1(ap->fun->ab.exp, ap->arg); /* ap->arg and top ap/ab is eliminated */
         } else if (isval(ap->fun)) {
+            debug(" -> E-APP2");
             ap->arg = eval1(ap->arg, jb);
             return t;
         } else {
+            debug(" -> E-APP1");
             ap->fun = eval1(ap->fun, jb);
             return t;
         }
     }
+    debug(" -> [no rule]");
     longjmp(jb, 1);
 }
 
 union term *eval(union term *t)
 {
     jmp_buf jb;
-    while (!setjmp(jb))
+    while (!setjmp(jb)) {
+        if (dbg) print(dbg, NULL, t);
         t = eval1(t, jb);
+        debug("\n");
+    }
+    debug("\n");
     return t;
 }
 

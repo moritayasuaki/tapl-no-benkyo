@@ -278,7 +278,7 @@ void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx, int lapp)
         } else if (ap->fun->tag == tvar) {
             print_fun(dst, src, ap->fun, ctx);
         } else {
-            print_term(dst, src, ap->fun, ctx, 1);
+            print_term(dst, src, ap->fun, ctx, lapp+1);
         }
         fputs(" ", dst);
         if (ap->arg->tag == tapp || (ap->arg->tag == tabs && lapp)) {

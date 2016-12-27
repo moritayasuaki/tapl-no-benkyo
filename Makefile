@@ -1,8 +1,13 @@
-CPPFLAGS+=-DNDEBUG
+CFLAGS+=-DDEBUG
 target = nb lam
-test = $(target:%=%-test)
-all: $(target) $(test)
+testres = $(target:%=%.ok)
+all: test build
+build: $(target);
+test: $(testres)
+
 clean:
-	rm -f $(target) $(test)
-%-test: % %-test.sh
-	./$@.sh && touch $@
+	rm -f $(target) $(testres)
+%:%.c
+	$(LINK.c) $< -o $@
+%.ok:% %.test
+	./$*.test && touch $@

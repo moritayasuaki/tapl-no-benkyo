@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <setjmp.h>
+#include <string.h>
 #include <ctype.h>
 
 FILE *dbg;
@@ -18,8 +19,7 @@ struct term {
     struct term *sub[3];
 };
 
-int match(FILE *in, char *str)
-{
+int match(FILE *in, char *str) {
     int c;
     fpos_t save;
     while(isspace(c = fgetc(in)));
@@ -28,7 +28,7 @@ int match(FILE *in, char *str)
     while (*str)
         if (fgetc(in) != *str++)
             goto mismatch;
-    return 1;
+    return !0;
 mismatch:
     fsetpos(in, &save);
     return 0;
@@ -114,88 +114,88 @@ void print_term(FILE *out, struct term *t)
     error("invalid term");
 }
 
-void print(FILE *out, struct term *t) {
+int print(FILE *out, struct term *t) {
     print_term(out, t);
-    fputs("\n", out);
+    return fputs("\n", out);
 }
 
 int isnat(struct term *t)
 {
     if (t->tag == _0)
-        return 1;
+        return !0;
     if (t->tag == succ && isnat(t->sub[0]))
-        return 1;
+        return !0;
     return 0;
 }
 
 struct term *eval1(struct term *t, jmp_buf ctx)
 {
     struct term *tmp;
-    debug(" -> ");
     switch (t->tag) {
     case if_then_else:
         switch (t->sub[0]->tag) {
         case true:
-            debug("E-IFTRUE");
+            debug(" <- E-IFTRUE");
             tmp = t->sub[1];
             free(t->sub[0]);
             free(t->sub[2]);
             free(t);
             return tmp;
         case false:
-            debug("E-IFFALSE");
+            debug(" <- E-IFFALSE");
             tmp = t->sub[2];
             free(t->sub[0]);
             free(t->sub[1]);
             free(t);
             return tmp;
         default:
-            debug("E-IF");
+            debug(" <- E-IF");
             t->sub[0] = eval1(t->sub[0], ctx);
             return t;
         }
     case succ:
-        debug("E-SUCC");
+        debug(" <- E-SUCC");
         t->sub[0] = eval1(t->sub[0], ctx);
         return t;
     case pred:
         switch (t->sub[0]->tag) {
         case _0:
-            debug("E-PREDZERO");
+            debug(" <- E-PREDZERO");
             free(t->sub[0]);
             t->tag = _0;
             return t;
         case succ:
             if (!isnat(t->sub[0]->sub[0]))
                 longjmp(ctx, 1);
-            debug("E-PREDSUCC");
+            debug(" <- E-PREDSUCC");
             tmp = t->sub[0]->sub[0];
             free(t->sub[0]);
             free(t);
             return tmp;
         default:
-            debug("E-PRED");
+            debug(" <- E-PRED");
             t->sub[0] = eval1(t->sub[0], ctx);
             return t;
         }
     case iszero:
         switch (t->sub[0]->tag) {
         case _0:
-            debug("E-ISZEROZERO");
+            debug(" <- E-ISZEROZERO");
             free(t->sub[0]);
             t->tag = true;
             return t;
         case succ:
-            debug("E-ISZEROSUCC");
+            debug(" <- E-ISZEROSUCC");
             free(t->sub[0]);
             t->tag = false;
             return t;
         default:
-            debug("E-ISZERO");
+            debug(" <- E-ISZERO");
             t->sub[0] = eval1(t->sub[0], ctx);
             return t;
         }
     default:
+        debug(" <- [no rule]\n");
         longjmp(ctx, 1);
     }
 }
@@ -204,13 +204,10 @@ struct term *eval(struct term *t)
 {
     jmp_buf ctx;
     while(!setjmp(ctx)) {
-        if (dbg)
-            print_term(dbg, t);
-        debug("\n");
+        dbg && print(dbg, t);
         t = eval1(t, ctx);
         debug("\n");
     }
-    debug("[no rule]\n");
     return t;
 }
 
@@ -226,7 +223,7 @@ FILE *read(void)
 
 int main(int argc, char **argv)
 {
-#ifndef NDEBUG
+#ifdef DEBUG
     dbg = stderr;
 #endif
     FILE *tmp = read();

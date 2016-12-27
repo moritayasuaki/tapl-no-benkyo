@@ -34,6 +34,7 @@ struct app {
     enum tag tag;
     union term *fun;
     union term *arg;
+    struct app *next;
 };
 
 union term {
@@ -253,8 +254,7 @@ void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
     ctx = pop_ctx(ctx);
 }
 
-void print_fun(FILE *dst, FILE *src, union term *fun, struct ctx *ctx)
-{
+void print_fun(FILE *dst, FILE *src, union term *fun, struct ctx *ctx) {
     switch (fun->tag) {
     case tabs:
         print_abs(dst, src, &fun->ab, ctx);
@@ -263,35 +263,52 @@ void print_fun(FILE *dst, FILE *src, union term *fun, struct ctx *ctx)
         print_var(dst, src, &fun->v, ctx);
         return;
     default:
-        print_term(dst, src, fun, ctx);
-        return;
+        error("hoge");
     }
 }
 
 void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx)
 {
     if (t->tag == tapp) {
-        if (t->ap.fun->tag == tabs) {
+        struct app *p = &t->ap;
+        p->next = NULL;
+        while (p->fun->tag == tapp) {
+            struct app *n = p;
+            p = &p->fun->ap;
+            p->next = n;
+        }
+        if (p->fun->tag == tabs) {
             fputs("(", dst);
-            print_fun(dst, src, t->ap.fun, ctx);
+            print_fun(dst, src, p->fun, ctx);
             fputs(")", dst);
         } else {
-            print_fun(dst, src, t->ap.fun, ctx);
+            print_fun(dst, src, p->fun, ctx);
+        }
+        while (p->next) {
+            fputs(" ", dst);
+            if (p->arg->tag == tapp || p->arg->tag == tabs) {
+                fputs("(", dst);
+                print_term(dst, src, p->arg, ctx);
+                fputs(")", dst);
+            } else {
+                print_term(dst, src, p->arg, ctx);
+            }
+            p = p->next;
         }
         fputs(" ", dst);
-        if (t->ap.arg->tag == tapp) {
+        if (p->arg->tag == tapp) {
             fputs("(", dst);
-            print_term(dst, src, t->ap.arg, ctx);
+            print_term(dst, src, p->arg, ctx);
             fputs(")", dst);
         } else {
-            print_term(dst, src, t->ap.arg, ctx);
+            print_term(dst, src, p->arg, ctx);
         }
     } else {
         print_fun(dst, src, t, ctx);
     }
 }
 
-void print(FILE *dst, FILE *src, union term *t)
+int print(FILE *dst, FILE *src, union term *t)
 {
     struct ctx root = {
         .pos = 0,
@@ -300,7 +317,7 @@ void print(FILE *dst, FILE *src, union term *t)
         .next = &root,
     };
     print_term(dst, src, t, &root);
-    fputs("\n", dst);
+    return fputs("\n", dst);
 }
 
 union term *shift(union term *t, int d, int c)
@@ -387,7 +404,7 @@ union term *eval1(union term *t, jmp_buf jb)
             return t;
         }
     }
-    debug(" -> [no rule]");
+    debug(" -> [no rule]\n");
     longjmp(jb, 1);
 }
 
@@ -395,11 +412,10 @@ union term *eval(union term *t)
 {
     jmp_buf jb;
     while (!setjmp(jb)) {
-        if (dbg) print(dbg, NULL, t);
+        dbg && print(dbg, NULL, t);
         t = eval1(t, jb);
         debug("\n");
     }
-    debug("\n");
     return t;
 }
 
@@ -415,7 +431,7 @@ FILE *read(void)
 
 int main(int argc, char **argv)
 {
-#ifndef NDEBUG
+#ifdef DEBUG
     dbg = stderr;
 #endif
     FILE *tmp = read();

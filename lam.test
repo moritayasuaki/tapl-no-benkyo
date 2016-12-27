@@ -1,6 +1,7 @@
 #!/bin/sh -e
 res=`mktemp`
 
+
 echo "test case 1"
 ./lam > $res << in
 (lambda x . lambda y . x y) lambda z . z
@@ -40,3 +41,28 @@ in
 diff $res - << out
 lambda x.lambda y.lambda z.lambda w.x y z w
 out
+
+echo "test case 6"
+./lam > $res << in
+(lambda x.x) (lambda x.x) (lambda x.x) (lambda x.x)
+in
+diff $res - << out
+lambda x.x
+out
+
+echo "test case 7"
+./lam > $res << in
+(lambda x.x) ((lambda x.x) (lambda x.x)) (lambda x.x)
+in
+diff $res - << out
+lambda x.x
+out
+
+echo "test case 8"
+./lam > $res << in
+(lambda x.lambda y.lambda z.lambda w.x y z w) (lambda a.a) (lambda b.b)
+in
+diff $res - << out
+lambda z.lambda w.(lambda a.a) (lambda b.b) z w
+out
+

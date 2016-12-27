@@ -1,4 +1,4 @@
-CFLAGS+=-DDEBUG
+#CFLAGS+=-DDEBUG
 target = nb lam
 testres = $(target:%=%.ok)
 all: test build

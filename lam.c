@@ -218,7 +218,7 @@ union term *parse(FILE *src)
     return parse_term(src, &root);
 }
 
-void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx);
+void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx, int lapp);
 
 void print_var(FILE *dst, FILE *src, struct var *v, struct ctx *ctx)
 {
@@ -250,7 +250,7 @@ void print_abs(FILE *dst, FILE *src, struct abs *ab, struct ctx *ctx)
         fputs("lambda.", dst);
     }
     ctx = push_ctx(ctx, ab->pos);
-    print_term(dst, src, ab->exp, ctx);
+    print_term(dst, src, ab->exp, ctx, 0);
     ctx = pop_ctx(ctx);
 }
 
@@ -267,41 +267,26 @@ void print_fun(FILE *dst, FILE *src, union term *fun, struct ctx *ctx) {
     }
 }
 
-void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx)
+void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx, int lapp)
 {
     if (t->tag == tapp) {
-        struct app *p = &t->ap;
-        p->next = NULL;
-        while (p->fun->tag == tapp) {
-            struct app *n = p;
-            p = &p->fun->ap;
-            p->next = n;
-        }
-        if (p->fun->tag == tabs) {
+        struct app *ap = &t->ap;
+        if (ap->fun->tag == tabs) {
             fputs("(", dst);
-            print_fun(dst, src, p->fun, ctx);
+            print_fun(dst, src, ap->fun, ctx);
             fputs(")", dst);
+        } else if (ap->fun->tag == tvar) {
+            print_fun(dst, src, ap->fun, ctx);
         } else {
-            print_fun(dst, src, p->fun, ctx);
-        }
-        while (p->next) {
-            fputs(" ", dst);
-            if (p->arg->tag == tapp || p->arg->tag == tabs) {
-                fputs("(", dst);
-                print_term(dst, src, p->arg, ctx);
-                fputs(")", dst);
-            } else {
-                print_term(dst, src, p->arg, ctx);
-            }
-            p = p->next;
+            print_term(dst, src, ap->fun, ctx, 1);
         }
         fputs(" ", dst);
-        if (p->arg->tag == tapp) {
+        if (ap->arg->tag == tapp || (ap->arg->tag == tabs && lapp)) {
             fputs("(", dst);
-            print_term(dst, src, p->arg, ctx);
+            print_term(dst, src, ap->arg, ctx, 0);
             fputs(")", dst);
         } else {
-            print_term(dst, src, p->arg, ctx);
+            print_term(dst, src, ap->arg, ctx, 0);
         }
     } else {
         print_fun(dst, src, t, ctx);
@@ -316,7 +301,7 @@ int print(FILE *dst, FILE *src, union term *t)
         .binding = NULL,
         .next = &root,
     };
-    print_term(dst, src, t, &root);
+    print_term(dst, src, t, &root, 0);
     return fputs("\n", dst);
 }
 
@@ -367,7 +352,8 @@ union term *subst(union term *t, int j, int c, union term *s)
     case tvar:
         if (t->v.idx == j+c) {
             union term *ss = copy(s);
-            return shift(ss, c, 0); /* ap->arg and top ap/ab is eliminated */
+            free(t);
+            return shift(ss, c, 0);
         }
         return t;
     }
@@ -393,7 +379,11 @@ union term *eval1(union term *t, jmp_buf jb)
         struct app *ap = &t->ap;
         if (ap->fun->tag == tabs && isval(ap->arg)) {
             debug(" -> E-APPABS");
-            return subst1(ap->fun->ab.exp, ap->arg); /* ap->arg and top ap/ab is eliminated */
+            t = subst1(ap->fun->ab.exp, ap->arg);
+            free(ap->fun);
+            free(ap->arg);
+            free(ap);
+            return t;
         } else if (isval(ap->fun)) {
             debug(" -> E-APP2");
             ap->arg = eval1(ap->arg, jb);

@@ -702,7 +702,7 @@ union type *get_type(union term *t, struct ctx *ctx)
             if (tfun->tag != tyarr)
                 error("arrow type expected\n");
             if (!equal_type(tfun->from, targ))
-                error("parameter mismatch");
+                error("parameter type mismatch\n");
             return tfun->to;
         }
     case tmtrue:
@@ -716,7 +716,7 @@ union type *get_type(union term *t, struct ctx *ctx)
             else
                 error("arms of conditional have different types\n");
         } else {
-            error("guard of conditional not a boolean\n");
+            error("guard of conditional not a boolean types\n");
         }
     default:
         error("invalid type\n");

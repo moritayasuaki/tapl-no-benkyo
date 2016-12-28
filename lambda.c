@@ -66,14 +66,14 @@ mismatch:
 
 int match_id(FILE *src, char *id)
 {
-    int c;
     fpos_t save;
     fgetpos(src, &save);
     if (!match_str(src, id))
         goto mismatch;
-    c = fgetc(src);
+    int c = fgetc(src);
     if (isalnum(c) || c == '_')
         goto mismatch;
+    ungetc(c, src);
     return 1;
 mismatch:
     fsetpos(src, &save);
@@ -82,9 +82,8 @@ mismatch:
 
 char *get_id(FILE *src, char *id)
 {
-    int c;
     char *p = id;
-    c = fgetc(src);
+    int c = fgetc(src);
     if (!(isalpha(c) || c == '_')) {
         ungetc(c, src);
         return NULL;
@@ -93,6 +92,8 @@ char *get_id(FILE *src, char *id)
         *p++ = c;
         c = fgetc(src);
     } while (p - id < 32 && (isalnum(c) || c == '_'));
+    if (p - id >= 32)
+        error("too long identifier!\n");
     ungetc(c, src);
     *p = '\0';
     return id;
@@ -309,7 +310,9 @@ union term *shift(union term *t, int d, int c)
     switch (t->tag) {
     case tapp:
         t->ap.fun = shift(t->ap.fun, d, c);
-        t->ap.arg = shift(t->ap.arg, d, c); return t; case tabs:
+        t->ap.arg = shift(t->ap.arg, d, c);
+        return t;
+    case tabs:
         t->ab.exp = shift(t->ab.exp, d, c+1);
         return t;
     case tvar:

@@ -1,5 +1,5 @@
-#CFLAGS+=-DDEBUG
-target = natbool lambda
+CFLAGS+=-DDEBUG -g
+target = natbool lambda simplebool
 testres = $(target:%=%.ok)
 all: test build
 build: $(target);

@@ -135,21 +135,21 @@ struct term *eval1(struct term *t, jmp_buf ctx)
     case if_then_else:
         switch (t->sub[0]->tag) {
         case true:
-            debug(" <- E-IFTRUE");
+            debug(" -> E-IFTRUE");
             tmp = t->sub[1];
             free(t->sub[0]);
             free(t->sub[2]);
             free(t);
             return tmp;
         case false:
-            debug(" <- E-IFFALSE");
+            debug(" -> E-IFFALSE");
             tmp = t->sub[2];
             free(t->sub[0]);
             free(t->sub[1]);
             free(t);
             return tmp;
         default:
-            debug(" <- E-IF");
+            debug(" -> E-IF");
             t->sub[0] = eval1(t->sub[0], ctx);
             return t;
         }

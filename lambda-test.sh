@@ -78,6 +78,8 @@ c0="(lambda s.lambda z. z)"
 c1="(lambda s.lambda z. s z)"
 c2="(lambda s.lambda z. s (s z))"
 scc="(lambda n. lambda s. lambda z. s (n s z))"
+omega="((lambda x. x x) (lambda x. x x))"
+fix="(lambda f. (lambda x f (lambda y. x x y)) (lambda x. f (lambda x x y)))"
 
 echo "test case 9"
 ./lambda > $res << in

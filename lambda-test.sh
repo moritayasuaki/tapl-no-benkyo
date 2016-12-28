@@ -66,3 +66,55 @@ diff $res - << out
 lambda z.lambda w.(lambda a.a) (lambda b.b) z w
 out
 
+id="(lambda x.x)"
+tru="(lambda t.lambda f. t)"
+fls="(lambda t.lambda f. f)"
+tst="(lambda l.lambda m.lambda n. l m n)"
+and="(lambda b. lambda c. b c $fls)"
+pair="(lambda f. lambda s. lambda b. b f s)"
+fst="(lambda p. p $tru)"
+snd="(lambda p. p $fls)"
+c0="(lambda s.lambda z. z)"
+c1="(lambda s.lambda z. s z)"
+c2="(lambda s.lambda z. s (s z))"
+scc="(lambda n. lambda s. lambda z. s (n s z))"
+
+echo "test case 9"
+./lambda > $res << in
+($tst) ($tru) (lambda then.then) (lambda else.else)
+in
+diff $res - << out
+lambda then.then
+out
+
+echo "test case 10"
+./lambda > $res << in
+$tst $fls (lambda then.then) (lambda else.else)
+in
+diff $res - << out
+lambda else.else
+out
+
+echo "test case 11"
+./lambda > $res - << in
+$and  $tru $tru
+in
+diff $res - << out
+lambda t.lambda f.t
+out
+
+echo "test case 12"
+./lambda > $res - << in
+$and $tru $fls
+in
+diff $res - << out
+lambda t.lambda f.f
+out
+
+echo "test case 13"
+./lambda > $res - << in
+$scc $c1
+in
+diff $res - << out
+lambda s.lambda z.s ((lambda s.lambda z.s z) s z)
+out

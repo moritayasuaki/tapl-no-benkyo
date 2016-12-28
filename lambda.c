@@ -34,7 +34,6 @@ struct app {
     enum tag tag;
     union term *fun;
     union term *arg;
-    struct app *next;
 };
 
 union term {

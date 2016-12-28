@@ -1,5 +1,5 @@
 #CFLAGS+=-DDEBUG
-target = nb lam
+target = natbool lambda
 testres = $(target:%=%.ok)
 all: test build
 build: $(target);
@@ -9,5 +9,5 @@ clean:
 	rm -f $(target) $(testres)
 %:%.c
 	$(LINK.c) $< -o $@
-%.ok:% %.test
-	./$*.test && touch $@
+%.ok:% %-test.sh
+	./$*-test.sh && touch $@

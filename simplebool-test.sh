@@ -7,21 +7,21 @@ err=$(mktemp)
 lambda x:Bool->Bool.lambda y:Bool.if x y then true else false
 in
 diff $res - << out
-lambda x:Bool->Bool.lambda y:Bool.if x y then true else false
+lambda x:Bool->Bool.lambda y:Bool.if x y then true else false:(Bool->Bool)->Bool->Bool
 out
 
 ./simplebool > $res << in
 if true then false else false
 in
 diff $res - << out
-false
+false:Bool
 out
 
 ./simplebool > $res << in
 lambda x:Bool->Bool.x
 in
 diff $res - << out
-lambda x:Bool->Bool.x
+lambda x:Bool->Bool.x:(Bool->Bool)->Bool->Bool
 out
 
 ! ./simplebool 2> $err << in

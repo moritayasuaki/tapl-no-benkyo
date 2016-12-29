@@ -503,7 +503,7 @@ void print_term(FILE *dst, FILE *src, union term *t, struct ctx *ctx, int lapp)
     }
 }
 
-int print(FILE *dst, FILE *src, union term *t)
+int print(FILE *dst, FILE *src, union term *tm, union type *ty)
 {
     struct ctx root = {
         .pos = 0,
@@ -511,7 +511,11 @@ int print(FILE *dst, FILE *src, union term *t)
         .ty = NULL,
         .next = &root,
     };
-    print_term(dst, src, t, &root, 0);
+    print_term(dst, src, tm, &root, 0);
+    if (ty) {
+        fputs(":", dst);
+        print_type(dst, src, ty, &root);
+    }
     return fputs("\n", dst);
 }
 
@@ -663,7 +667,7 @@ union term *eval(union term *t)
 {
     jmp_buf jb;
     while (!setjmp(jb)) {
-        dbg && print(dbg, NULL, t);
+        dbg && print(dbg, NULL, t, NULL);
         t = eval1(t, jb);
         debug("\n");
     }
@@ -723,7 +727,7 @@ union type *get_type(union term *t, struct ctx *ctx)
     }
 }
 
-void check_type(union term *t)
+union type *check_type(union term *t)
 {
     struct ctx root = {
         .pos = 0,
@@ -731,7 +735,7 @@ void check_type(union term *t)
         .ty = NULL,
         .next = &root,
     };
-    get_type(t, &root);
+    return get_type(t, &root);
 }
 
 FILE *read(void)
@@ -748,11 +752,11 @@ int main(int argc, char **argv)
 {
     dbg = stderr;
     FILE *tmp = read();
-    union term *t = parse(tmp);
-    if (!t)
+    union term *tm = parse(tmp);
+    if (!tm)
         error("parse error!\n");
-    check_type(t);
-    t = eval(t);
-    print(stdout, tmp, t);
+    union type *ty = check_type(tm);
+    tm = eval(tm);
+    print(stdout, tmp, tm, ty);
     return 0;
 }

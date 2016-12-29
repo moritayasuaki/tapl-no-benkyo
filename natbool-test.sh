@@ -1,5 +1,5 @@
 #!/bin/sh -e
-res=`mktemp`
+res=$(mktemp)
 
 echo "test case 1"
 ./natbool > $res << in

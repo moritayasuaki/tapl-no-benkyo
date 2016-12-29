@@ -10,4 +10,5 @@ clean:
 %:%.c
 	$(LINK.c) $< -o $@
 %.ok:% %-test.sh
-	./$*-test.sh && touch $@
+	./$*-test.sh
+	touch $@

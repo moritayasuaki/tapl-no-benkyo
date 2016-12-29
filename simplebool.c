@@ -750,7 +750,7 @@ FILE *read(void)
 
 int main(int argc, char **argv)
 {
-    dbg = stderr;
+    // dbg = stderr;
     FILE *tmp = read();
     union term *tm = parse(tmp);
     if (!tm)

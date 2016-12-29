@@ -1,7 +1,6 @@
 #!/bin/sh -e
 res=$(mktemp)
 
-echo "test case 1"
 ./lambda > $res << EOS
 (lambda x . lambda y . x y) lambda z . z
 EOS
@@ -9,7 +8,6 @@ diff $res - << EOS
 lambda y.(lambda z.z) y
 EOS
 
-echo "test case 2"
 ./lambda > $res << EOS
 lambda x.lambda y.lambda z.x y z
 EOS
@@ -17,7 +15,6 @@ diff $res - << EOS
 lambda x.lambda y.lambda z.x y z
 EOS
 
-echo "test case 3"
 ./lambda > $res << EOS
 lambda x.lambda y.lambda z.x (y z)
 EOS
@@ -25,7 +22,6 @@ diff $res - << EOS
 lambda x.lambda y.lambda z.x (y z)
 EOS
 
-echo "test case 4"
 ./lambda > $res << EOS
 lambda x.lambda y.lambda z.lambda w.x (y (z w))
 EOS
@@ -33,7 +29,6 @@ diff $res - << EOS
 lambda x.lambda y.lambda z.lambda w.x (y (z w))
 EOS
 
-echo "test case 5"
 ./lambda > $res << EOS
 lambda x.lambda y.lambda z.lambda w.x y z w
 EOS
@@ -41,7 +36,6 @@ diff $res - << EOS
 lambda x.lambda y.lambda z.lambda w.x y z w
 EOS
 
-echo "test case 6"
 ./lambda > $res << EOS
 (lambda x.x) (lambda x.x) (lambda x.x) (lambda x.x)
 EOS
@@ -49,7 +43,6 @@ diff $res - << EOS
 lambda x.x
 EOS
 
-echo "test case 7"
 ./lambda > $res << EOS
 (lambda x.x) ((lambda x.x) (lambda x.x)) (lambda x.x)
 EOS
@@ -57,7 +50,6 @@ diff $res - << EOS
 lambda x.x
 EOS
 
-echo "test case 8"
 ./lambda > $res << EOS
 (lambda x.lambda y.lambda z.lambda w.x y z w) (lambda a.a) (lambda b.b)
 EOS
@@ -80,7 +72,6 @@ scc="lambda n.lambda s.lambda z.s (n s z)"
 omega="(lambda x.x x) lambda x.x x"
 fix="lambda f.(lambda x.f (lambda y.x x y)) lambda x.f (lambda x x y)"
 
-echo "test case 9"
 ./lambda > $res << EOS
 ($tst) ($tru) (lambda then.then) lambda else.else
 EOS
@@ -88,7 +79,6 @@ diff $res - << EOS
 lambda then.then
 EOS
 
-echo "test case 10"
 ./lambda > $res << EOS
 ($tst) ($fls) (lambda then.then) lambda else.else
 EOS
@@ -96,7 +86,6 @@ diff $res - << EOS
 lambda else.else
 EOS
 
-echo "test case 11"
 ./lambda > $res - << EOS
 ($and) ($tru) ($tru)
 EOS
@@ -104,7 +93,6 @@ diff $res - << EOS
 $tru
 EOS
 
-echo "test case 12"
 ./lambda > $res - << EOS
 ($and) ($tru) ($fls)
 EOS
@@ -112,7 +100,7 @@ diff $res - << EOS
 $fls
 EOS
 
-echo "test case 13"
+
 ./lambda > $res - << EOS
 ($scc) ($c1)
 EOS
@@ -120,7 +108,6 @@ diff $res - << EOS
 lambda s.lambda z.s ((lambda s.lambda z.s z) s z)
 EOS
 
-echo "test case 14"
 ./lambda > $res - << EOS
 ($id) ($id)
 EOS

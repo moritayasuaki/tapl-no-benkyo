@@ -8,18 +8,28 @@
 #include <stdalign.h>
 #include <limits.h>
 
+#define generic     _Generic
 #define info(...)   fprintf(stderr, __VA_ARGS__)
 #define warn(...)   fprintf(stderr, __VA_ARGS__)
 #define error(...)  (fprintf(stderr, __VA_ARGS__), exit(1))
 #define debug(...)  (debug_file && fprintf(debug_file, __VA_ARGS__))
 #define bug()       (error("%s:%d:%s() bug!\n", __FILE__, __LINE__, __func__))
 #define lim_id_len  32
-#define generic _Generic
-#define min_idx (INT_MIN >> 4)
-#define max_idx (INT_MAX >> 4)
+#define min_idx     (INT_MIN >> 4)
+#define max_idx     (INT_MAX >> 4)
+
+#define prolog      "+---------------+\n"\
+                    "| TAPLE chap 4. |\n"\
+                    "+---------------+\n"
+
+#define epilog      "+---------------+\n"\
+                    "|  good bye ;)  |\n"\
+                    "+---------------+\n"
+
+#define console     ">>> "
 
 FILE *debug_file;
-char *interactive;
+int interactive;
 union term;
 struct bind;
 
@@ -63,7 +73,6 @@ enum tag {
 };
 
 static_assert(tapp < tvar, "num of reference tag exceed pointer align\n");
-
 
 #define is_tnil(x) (((x).raw) == -1)
 #define tnil (ref_t){-1}
@@ -741,7 +750,7 @@ int main(int argc, char **argv)
             while (*opt)
                 switch (*opt++) {
                 case 'i':
-                    interactive = ">>> ";
+                    interactive = 1;
                     break;
                 case 'd':
                     debug_file = stderr;
@@ -756,7 +765,8 @@ int main(int argc, char **argv)
     ctx.log = tmpfile();
     ctx.buf = tmpfile();
     ctx.top = NULL;
-
+    if (interactive)
+        info("%s", prolog);
 loop:
     debug("loop :\n");
     ref_t term = tnil;
@@ -769,10 +779,13 @@ loop:
         restore_pos(&ctx, pos);
         ctx.len = len;
     }
-    if (is_eof(ctx.src))
+    if (is_eof(ctx.src)) {
+        if (interactive)
+            info("%s", epilog);
         return 1;
+    }
     if (interactive)
-        info("%s", interactive);
+        info("%s", console);
     debug("read :\n");
     reset_log(&ctx);
     read_line(&ctx);

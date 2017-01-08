@@ -15,8 +15,8 @@
 #define debug(...)  (debug_file && fprintf(debug_file, __VA_ARGS__))
 #define bug()       (error("%s:%d:%s() bug!\n", __FILE__, __LINE__, __func__))
 #define lim_id_len  32
-#define min_idx     (INT_MIN >> 4)
-#define max_idx     (INT_MAX >> 4)
+#define min_idx     (INT_MIN)
+#define max_idx     (INT_MAX)
 
 #define prolog      "+---------------+\n"\
                     "| TAPLE chap 4. |\n"\
@@ -739,8 +739,6 @@ void dump_log(struct ctx *ctx)
     }
 }
 
-struct ctx ctx;
-
 int main(int argc, char **argv)
 {
     jmp_buf jb;
@@ -759,12 +757,14 @@ int main(int argc, char **argv)
                     warn("illegal option -- %c\n", *opt);
                 }
     }
-    ctx.len = 0;
-    ctx.src = stdin;
-    ctx.dst = stdout;
-    ctx.log = tmpfile();
-    ctx.buf = tmpfile();
-    ctx.top = NULL;
+    struct ctx ctx = {
+        .len = 0,
+        .src = stdin,
+        .dst = stdout,
+        .log = tmpfile(),
+        .buf = tmpfile(),
+        .top = NULL,
+    };
     if (interactive)
         info("%s", prolog);
     do {

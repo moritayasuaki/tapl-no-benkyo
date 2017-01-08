@@ -45,7 +45,7 @@ struct ctx {
 };
 
 struct bind {
-    int pos;
+    fpos_t pos;
     ref_t def;
     ref_t type;
 };
@@ -74,8 +74,8 @@ enum tag {
 
 static_assert(tapp < tvar, "num of reference tag exceed pointer align\n");
 
-#define is_tnil(x) (((x).raw) == -1)
-#define tnil (ref_t){-1}
+#define is_tnil(x) (((x).raw) == 0)
+#define tnil (ref_t){0}
 #define tsize  sizeof(union term)
 #define talign alignof(union term)
 
@@ -224,6 +224,11 @@ int is_keyword(char *id)
         !strcmp(id, "let");
 }
 
+struct bind *get_base(struct ctx *ctx)
+{
+    return ctx->top + ctx->len;
+}
+
 char *get_id(struct ctx *ctx, char *id)
 {
     skip_spaces(ctx);
@@ -257,26 +262,25 @@ char *get_id(struct ctx *ctx, char *id)
 int find_bind_idx(struct ctx *ctx, char *id)
 {
     int len = ctx->len;
-    struct bind *top = ctx->top;
+    struct bind *base = get_base(ctx);
     fpos_t save = save_pos(ctx);
-    int idx;
-    for (idx = 0; idx < len; idx++) {
-        restore_pos(ctx, top[len-idx-1].pos);
+    for (int idx=1; idx <= len; idx++) {
+        restore_pos(ctx, base[-idx].pos);
         if (match_id(ctx, id)) {
             restore_pos(ctx, save);
             return idx;
         }
     }
     restore_pos(ctx, save);
-    return idx;
+    return 0;
 }
 
 struct bind *get_bind(struct ctx *ctx, int idx)
 {
     int len = ctx->len;
-    struct bind *top = ctx->top;
-    if (idx < len)
-        return &top[len-idx-1];
+    struct bind *base = get_base(ctx);
+    if (0 < idx && idx <= len)
+        return &base[-idx];
     bug();
 }
 
@@ -357,7 +361,7 @@ ref_t parse_var(struct ctx *ctx, jmp_buf jb)
     }
     debug("%*c%s\n", ctx->len, ' ', __func__);
     int idx = find_bind_idx(ctx, id);
-    if (idx >= ctx->len) {
+    if (!idx) {
         restore_pos(ctx, pos);
         reset_log(ctx);
         append_log(ctx, "use of undeclared identifier '%s'\n", id);
@@ -560,7 +564,7 @@ ref_t shift(ref_t exp, int d, int c)
     case tvar:
         {
             int idx = to_var(exp);
-            if (idx >= c)
+            if (idx > c)
                 idx += d;
             return to_ref(idx);
         }
@@ -659,13 +663,6 @@ ref_t subst(ref_t exp, int j, int c, ref_t sub)
     }
 }
 
-ref_t subst1(ref_t t, ref_t s)
-{
-    s = shift(s, 1, 0);
-    t = subst(t, 0, 0, s);
-    t = shift(t, -1, 0);
-    return t;
-}
 
 int is_val(ref_t term)
 {
@@ -687,7 +684,9 @@ ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
             if (get_tag(app->fun) == tabs && is_val(app->arg)) {
                 debug(" -> E-APPABS");
                 struct abs *abs = to_abs(app->fun);
-                term = subst1(abs->exp, app->arg);
+                app->arg = shift(app->arg, 1, 0);
+                abs->exp = subst(abs->exp, 1, 0, app->arg);
+                term = shift(abs->exp, -1, 0);
                 free(abs);
                 discard(app->arg);
                 free(app);

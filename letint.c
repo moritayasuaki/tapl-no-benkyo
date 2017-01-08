@@ -18,6 +18,8 @@
 #define min_idx     (INT_MIN)
 #define max_idx     (INT_MAX)
 
+static_assert(sizeof(intptr_t) > sizeof(int), "pointer size is very small\n");
+
 #define prolog      "+---------------+\n"\
                     "| TAPLE chap 4. |\n"\
                     "+---------------+\n"
@@ -51,8 +53,8 @@ struct bind {
 };
 
 struct abs {
-    fpos_t pos;
     ref_t exp;
+    fpos_t pos;
 };
 
 struct app {
@@ -66,18 +68,18 @@ union term {
 };
 
 enum tag {
-    thole,
+    tvar,
     tabs,
     tapp,
-    tvar = alignof(union term*),
+    thole = alignof(union term),
 };
 
-static_assert(tapp < tvar, "num of reference tag exceed pointer align\n");
 
 #define is_tnil(x) (((x).raw) == 0)
 #define tnil (ref_t){0}
 #define tsize  sizeof(union term)
 #define talign alignof(union term)
+static_assert(tapp < talign, "num of reference tag exceed pointer align\n");
 
 int to_var(ref_t ref)
 {
@@ -217,6 +219,14 @@ mismatch:
     return 0;
 }
 
+int match(struct ctx *ctx, char *s)
+{
+    skip_spaces(ctx);
+    if (isalpha(*s) || *s == '_')
+        return match_id(ctx, s);
+    return match_str(ctx, s);
+}
+
 int is_keyword(char *id)
 {
     return !strcmp(id, "in") ||
@@ -290,6 +300,8 @@ void push_bind(struct ctx *ctx, fpos_t pos)
     struct bind *top = ctx->top;
     top = realloc(top, (len+1) * sizeof(struct bind));
     top[len].pos = pos;
+    top[len].def = tnil;
+    top[len].type = tnil;
     if (!top)
         error("no memeory\n");
     ctx->top = top;
@@ -502,32 +514,24 @@ void print_abs(struct abs *abs, struct ctx *ctx)
     pop_bind(ctx);
 }
 
-void print_fun(ref_t fun, struct ctx *ctx)
-{
-    switch (get_tag(fun)) {
-    case tabs:
-        print_abs(to_abs(fun), ctx);
-        return;
-    case tvar:
-        print_var(to_var(fun), ctx);
-        return;
-    default:
-        bug();
-    }
-}
-
 void print_term(ref_t term, struct ctx *ctx, int lapp)
 {
     switch (get_tag(term)) {
+    case tvar:
+        print_var(to_var(term), ctx);
+        return;
+    case tabs:
+        print_abs(to_abs(term), ctx);
+        return;
     case tapp:
         {
             struct app *app = to_app(term);
             if (get_tag(app->fun) == tabs) {
                 emit_str(ctx, "(");
-                print_fun(app->fun, ctx);
+                print_abs(to_abs(app->fun), ctx);
                 emit_str(ctx, ")");
             } else if (get_tag(app->fun) == tvar) {
-                print_fun(app->fun, ctx);
+                print_var(to_var(app->fun), ctx);
             } else {
                 print_term(app->fun, ctx, 1);
             }
@@ -540,12 +544,6 @@ void print_term(ref_t term, struct ctx *ctx, int lapp)
                 print_term(app->arg, ctx, 0);
             }
         }
-        return;
-    case tabs:
-        print_fun(term, ctx);
-        return;
-    case tvar:
-        print_fun(term, ctx);
         return;
     default:
         bug();
@@ -568,18 +566,18 @@ ref_t shift(ref_t exp, int d, int c)
                 idx += d;
             return to_ref(idx);
         }
+    case tabs:
+        {
+            struct abs *abs = to_abs(exp);
+            abs->exp = shift(abs->exp, d, c+1);
+            return to_ref(abs);
+        }
     case tapp:
         {
             struct app *app = to_app(exp);
             app->fun = shift(app->fun, d, c);
             app->arg = shift(app->arg, d, c);
             return to_ref(app);
-        }
-    case tabs:
-        {
-            struct abs *abs = to_abs(exp);
-            abs->exp = shift(abs->exp, d, c+1);
-            return to_ref(abs);
         }
     default:
         bug();
@@ -589,6 +587,15 @@ ref_t shift(ref_t exp, int d, int c)
 ref_t copy(ref_t term)
 {
     switch (get_tag(term)) {
+    case tvar:
+        return term;
+    case tabs:
+        {
+            struct abs *abs = malloc(tsize);
+            memcpy(abs, to_abs(term), tsize);
+            abs->exp = copy(to_abs(term)->exp);
+            return to_ref(abs);
+        }
     case tapp:
         {
             struct app *app = malloc(tsize);
@@ -597,15 +604,6 @@ ref_t copy(ref_t term)
             app->arg = copy(to_app(term)->arg);
             return to_ref(app);
         }
-    case tabs:
-        {
-            struct abs *abs = malloc(tsize);
-            memcpy(abs, to_abs(term), tsize);
-            abs->exp = copy(to_abs(term)->exp);
-            return to_ref(abs);
-        }
-    case tvar:
-        return term;
     default:
         bug();
     }
@@ -618,23 +616,34 @@ void discard(ref_t term)
     switch (get_tag(term)) {
     case tvar:
         return;
+    case tabs:
+        discard(to_abs(term)->exp);
+        free(to_abs(term));
+        return;
     case tapp:
         discard(to_app(term)->fun);
         discard(to_app(term)->arg);
         free(to_app(term));
-        return;
-    case tabs:
-        discard(to_abs(term)->exp);
-        free(to_abs(term));
         return;
     default:
         bug();
     }
 }
 
+
 ref_t subst(ref_t exp, int j, int c, ref_t sub)
 {
     switch (get_tag(exp)) {
+    case tvar:
+        {
+            int idx = to_var(exp);
+            if (idx == j+c) {
+                sub = copy(sub);
+                sub = shift(sub, c, 0);
+                return sub;
+            }
+            return to_ref(idx);
+        }
     case tapp:
         {
             struct app *app = to_app(exp);
@@ -648,16 +657,6 @@ ref_t subst(ref_t exp, int j, int c, ref_t sub)
             abs->exp = subst(abs->exp, j, c+1, sub);
             return to_ref(abs);
         }
-    case tvar:
-        {
-            int idx = to_var(exp);
-            if (idx == j+c) {
-                sub = copy(sub);
-                sub = shift(sub, c, 0);
-                return sub;
-            }
-            return to_ref(idx);
-        }
     default:
         bug();
     }
@@ -669,15 +668,48 @@ int is_val(ref_t term)
     return get_tag(term) == tabs;
 }
 
-int is_beta_radix(ref_t term)
+int is_beta_redex(ref_t term)
 {
     return get_tag(term) == tapp &&
         get_tag(to_app(term)->fun) == tabs;
 }
 
+ref_t beta(ref_t term)
+{
+    struct app *app = to_app(term);
+    struct abs *abs = to_abs(app->fun);
+    app->arg = shift(app->arg, 1, 0);
+    abs->exp = subst(abs->exp, 1, 0, app->arg);
+    term = shift(abs->exp, -1, 0);
+    free(abs);
+    discard(app->arg);
+    free(app);
+    return term;
+}
+
+int is_delta_redex(struct ctx *ctx, ref_t term)
+{
+    int idx = to_var(term);
+    struct bind *bind = get_bind(ctx, idx);
+    return !is_tnil(bind->def);
+}
+
+ref_t delta(struct ctx *ctx, ref_t term)
+{
+    int idx = to_var(term);
+    struct bind *bind = get_bind(ctx, idx);
+    ref_t sub = copy(bind->def);
+    sub = shift(sub, idx, 0);
+    return sub;
+}
+
 ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
 {
     switch (get_tag(term)) {
+    case tvar:
+    case tabs:
+        debug(" -> [no rule]\n");
+        longjmp(jb, 1);
     case tapp:
         {
             struct app *app = to_app(term);
@@ -701,10 +733,6 @@ ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
                 return to_ref(app);
             }
         }
-    case tabs:
-    case tvar:
-        debug(" -> [no rule]\n");
-        longjmp(jb, 1);
     default:
         bug();
     }
@@ -724,6 +752,47 @@ ref_t eval(struct ctx *ctx, ref_t term, jmp_buf jb)
         debug("\n");
     }
     return term;
+}
+
+int equal(struct ctx *ctx, ref_t pair[2], jmp_buf jb)
+{
+    /* raw value identity */
+    int m;
+    while (1) {
+        if (pair[0].raw == pair[1].raw)
+            return 1;
+        enum tag tag0 = get_tag(pair[0]);
+        enum tag tag1 = get_tag(pair[1]);
+        m = tag0 > tag1;
+
+        if (tag0 == tag1 && tag0 == tabs) {
+            push_bind(ctx, to_abs(pair[m])->pos);
+            ref_t exps[2] = {to_abs(pair[0])->exp, to_abs(pair[1])->exp};
+            int e = equal(ctx, exps, jb);
+            to_abs(pair[0])->exp = exps[0];
+            to_abs(pair[1])->exp = exps[1];
+            pop_bind(ctx);
+            return e;
+        }
+
+        if (is_delta_redex(ctx, pair[m])) {
+            pair[m] = delta(ctx, pair[m]);
+            continue;
+        }
+        if (is_delta_redex(ctx, pair[!m])) {
+            pair[!m] = delta(ctx, pair[!m]);
+            continue;
+        }
+        if (is_beta_redex(pair[m])) {
+            pair[m] = beta(pair[m]);
+            continue;
+        }
+        if (is_beta_redex(pair[!m])) {
+            pair[!m] = beta(pair[!m]);
+            continue;
+        }
+        return 0;
+    }
 }
 
 void dump_log(struct ctx *ctx)

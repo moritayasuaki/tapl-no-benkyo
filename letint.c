@@ -746,9 +746,9 @@ int main(int argc, char **argv)
     jmp_buf jb;
     for (int i = 1; i < argc; i++) {
         char *opt = argv[i];
-        if (*opt++ == '-')
-            while (*opt)
-                switch (*opt++) {
+        if (*opt == '-')
+            while (*++opt)
+                switch (*opt) {
                 case 'i':
                     interactive = 1;
                     break;
@@ -756,7 +756,7 @@ int main(int argc, char **argv)
                     debug_file = stderr;
                     break;
                 default:
-                    warn("illegal option -- %c", *opt);
+                    warn("illegal option -- %c\n", *opt);
                 }
     }
     ctx.len = 0;
@@ -767,34 +767,32 @@ int main(int argc, char **argv)
     ctx.top = NULL;
     if (interactive)
         info("%s", prolog);
-loop:
-    debug("loop :\n");
-    ref_t term = tnil;
-    fpos_t pos = save_pos(&ctx);
-    int len = ctx.len;
-    if (setjmp(jb)) {
-        dump_log(&ctx);
-        if (!interactive)
-            return 1;
-        restore_pos(&ctx, pos);
-        ctx.len = len;
-    }
-    if (is_eof(ctx.src)) {
+    do {
+        ref_t term = tnil;
+        fpos_t pos = save_pos(&ctx);
+        int len = ctx.len;
+        if (setjmp(jb)) {
+            dump_log(&ctx);
+            if (!interactive)
+                exit(1);
+            restore_pos(&ctx, pos);
+            ctx.len = len;
+        }
+        if (is_eof(ctx.src)) {
+            if (interactive)
+                info("%s", epilog);
+            exit(0);
+        }
+        debug("read:\n");
+        reset_log(&ctx);
         if (interactive)
-            info("%s", epilog);
-        return 1;
-    }
-    if (interactive)
-        info("%s", console);
-    debug("read :\n");
-    reset_log(&ctx);
-    read_line(&ctx);
-    term = parse(&ctx, jb);
-    debug("eval :\n");
-    term = eval(&ctx, term, jb);
-    debug("print :\n");
-    print(&ctx, term);
-    if (interactive && !is_eof(stdin))
-        goto loop;
+            info("%s", console);
+        read_line(&ctx);
+        term = parse(&ctx, jb);
+        debug("eval:\n");
+        term = eval(&ctx, term, jb);
+        debug("print:\n");
+        print(&ctx, term);
+    } while (interactive);
     return 0;
 }

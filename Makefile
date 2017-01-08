@@ -1,5 +1,5 @@
 # CFLAGS+=-DDEBUG -g
-target = natbool let simplebool simplebool2 dependent lambda
+target = natbool let simplebool simplebool2 dependent lambda letint
 testres = $(target:%=%.ok)
 all: test build
 build: $(target);

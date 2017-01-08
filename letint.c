@@ -47,13 +47,14 @@ struct ctx {
 };
 
 struct bind {
-    fpos_t pos;
     ref_t def;
     ref_t type;
+    fpos_t pos;
 };
 
 struct abs {
     ref_t exp;
+    ref_t type;
     fpos_t pos;
 };
 
@@ -68,6 +69,7 @@ union term {
 };
 
 enum tag {
+    tnum,
     tvar,
     tabs,
     tapp,
@@ -188,6 +190,27 @@ int match_eol(struct ctx *ctx)
         return 1;
     undo_char(ctx, c);
     return 0;
+}
+
+int match_num(struct ctx *ctx)
+{
+    int c;
+    intptr_t i;
+    fpos_t save = save_pos(ctx);
+    c = eat_char(ctx);
+    if (!isdigit(c)) {
+        undo_char(ctx, c);
+        return -1;
+    }
+    i = c - '0';
+    while (1) {
+        c = eat_char(ctx);
+        if (!isdigit(c)) {
+            undo_char(ctx, c);
+            return i;
+        }
+        i = 10 * i + c - '0';
+    }
 }
 
 int match_str(struct ctx *ctx, char *str)
@@ -336,7 +359,7 @@ void reset_log(struct ctx *ctx)
 ref_t parse_abs(struct ctx *ctx, jmp_buf jb)
 {
     char buf[lim_id_len];
-    if (!match_id(ctx, "lambda")) {
+    if (!match(ctx, "lambda")) {
         append_log(ctx, "expected 'lambda'\n");
         return tnil;
     }
@@ -347,19 +370,37 @@ ref_t parse_abs(struct ctx *ctx, jmp_buf jb)
         append_log(ctx, "expected identifier\n");
         longjmp(jb, 1);
     }
-    if (!match_str(ctx, ".")) {
-        append_log(ctx, "expected '.'\n");
-        longjmp(jb, 1);
+    jmp_buf njb;
+    ref_t type = tnil;
+    ref_t exp = tnil;
+    if (!setjmp(njb)) {
+#if 0
+        if (!match(ctx, ":")) {
+            append_log(ctx, "expected ':'\n");
+            longjmp(njb, 1);
+        }
+        ref_t type = parse_term(ctx, njb);
+        if (is_tnil(type)) {
+            longjmp(njb, 1);
+        }
+#endif
+        if (!match(ctx, ".")) {
+            append_log(ctx, "expected '.'\n");
+            longjmp(njb, 1);
+        }
+        push_bind(ctx, pos);
+        ref_t exp = parse_term(ctx, njb);
+        if (is_tnil(exp))
+            longjmp(njb, 1);
+        struct abs *abs = malloc(tsize);
+        abs->pos = pos;
+        abs->exp = exp;
+        pop_bind(ctx);
+        return to_ref(abs);
     }
-    push_bind(ctx, pos);
-    ref_t exp = parse_term(ctx, jb);
-    if (is_tnil(exp))
-        longjmp(jb, 1);
-    struct abs *abs = malloc(tsize);
-    abs->pos = pos;
-    abs->exp = exp;
-    pop_bind(ctx);
-    return to_ref(abs);
+    discard(exp);
+    discard(type);
+    longjmp(jb, 1);
 }
 
 ref_t parse_var(struct ctx *ctx, jmp_buf jb)
@@ -385,7 +426,7 @@ ref_t parse_var(struct ctx *ctx, jmp_buf jb)
 ref_t parse_let(struct ctx *ctx, jmp_buf jb)
 {
     char id[lim_id_len];
-    if (!match_str(ctx, "let"))
+    if (!match(ctx, "let"))
         return tnil;
     debug("%*c%s\n", ctx->len, ' ', __func__);
     skip_spaces(ctx);
@@ -394,7 +435,7 @@ ref_t parse_let(struct ctx *ctx, jmp_buf jb)
         append_log(ctx, "expected identifier\n");
         longjmp(jb, 1);
     }
-    if (!match_str(ctx, "=")) {
+    if (!match(ctx, "=")) {
         append_log(ctx, "expected '='\n");
         longjmp(jb, 1);
     }
@@ -405,7 +446,7 @@ ref_t parse_let(struct ctx *ctx, jmp_buf jb)
         sub = parse_term(ctx, njb);
         if (!sub.raw)
             longjmp(njb, 1);
-        if (!match_str(ctx, "in")) {
+        if (!match(ctx, "in")) {
             append_log(ctx, "expected 'in'\n");
             longjmp(njb, 1);
         }
@@ -425,12 +466,22 @@ ref_t parse_let(struct ctx *ctx, jmp_buf jb)
     longjmp(jb, 1);
 }
 
+ref_t parse_num(struct ctx *ctx, jmp_buf jb)
+{
+    int i = match_num(ctx);
+    if (i < 0) {
+        append_log(ctx, "expected number\n");
+        return tnil;
+    }
+    return to_ref(i);
+}
+
 ref_t parse_fun(struct ctx *ctx, jmp_buf jb)
 {
     ref_t fun;
-    if (match_str(ctx, "(")) {
+    if (match(ctx, "(")) {
         fun = parse_term(ctx, jb);
-        if (!match_str(ctx, ")")) {
+        if (!match(ctx, ")")) {
             append_log(ctx, "expected ')'\n");
             longjmp(jb, 1);
         }
@@ -442,6 +493,11 @@ ref_t parse_fun(struct ctx *ctx, jmp_buf jb)
     fun = parse_abs(ctx, jb);
     if (!is_tnil(fun))
         goto success;
+#if 0
+    fun = parse_num(ctx, jb);
+    if (!is_tnil(fun))
+        goto success;
+#endif
     fun = parse_var(ctx, jb);
     if (!is_tnil(fun))
         goto success;

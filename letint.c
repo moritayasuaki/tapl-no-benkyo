@@ -870,10 +870,10 @@ int main(int argc, char **argv)
         if (*opt == '-')
             while (*++opt)
                 switch (*opt) {
-                case 'i':
+                case *"interactive":
                     interactive = 1;
                     break;
-                case 'd':
+                case *"debug":
                     debug_file = stderr;
                     break;
                 default:

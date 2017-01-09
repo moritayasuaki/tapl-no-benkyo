@@ -12,3 +12,9 @@ clean:
 %.ok:% %-test.sh
 	./$*-test.sh
 	touch $@
+
+%.pdf:%.md
+	pandoc $< -o $@
+
+preview : README.pdf
+	open $<

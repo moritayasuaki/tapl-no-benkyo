@@ -12,7 +12,7 @@ FILE *dbg;
 union type;
 union term;
 enum ctag {ctype, cterm};
-enum mtag {mabs, mapp, mvar, mfix};
+enum mtag {mabs, mapp, mvar};
 enum ttag {tarr, tall, tvar, tmu};
 
 struct ctx {

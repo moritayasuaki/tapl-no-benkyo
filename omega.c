@@ -297,8 +297,8 @@ int find_bind_idx(struct ctx *ctx, char *id)
     int len = ctx->len;
     struct bind *base = get_base(ctx);
     fpos_t save = save_pos(ctx);
-    for (int idx=1; idx <= len; idx++) {
-        restore_pos(ctx, base[-idx].pos);
+    for (int idx=-1; idx >= -len; idx--) {
+        restore_pos(ctx, base[idx].pos);
         if (match_id(ctx, id)) {
             restore_pos(ctx, save);
             return idx;
@@ -312,8 +312,8 @@ struct bind *get_bind(struct ctx *ctx, int idx)
 {
     int len = ctx->len;
     struct bind *base = get_base(ctx);
-    if (0 < idx && idx <= len)
-        return &base[-idx];
+    if (0 > idx && idx >= -len)
+        return &base[idx];
     bug();
 }
 
@@ -618,14 +618,14 @@ ref_t shift(ref_t exp, int d, int c)
     case tvar:
         {
             int idx = to_var(exp);
-            if (idx > c)
+            if (idx < c)
                 idx += d;
             return to_ref(idx);
         }
     case tabs:
         {
             struct abs *abs = to_abs(exp);
-            abs->exp = shift(abs->exp, d, c+1);
+            abs->exp = shift(abs->exp, d, c-1);
             return to_ref(abs);
         }
     case tapp:
@@ -686,7 +686,6 @@ void discard(ref_t term)
     }
 }
 
-
 ref_t subst(ref_t exp, int j, int c, ref_t sub)
 {
     switch (get_tag(exp)) {
@@ -710,7 +709,7 @@ ref_t subst(ref_t exp, int j, int c, ref_t sub)
     case tabs:
         {
             struct abs *abs = to_abs(exp);
-            abs->exp = subst(abs->exp, j, c+1, sub);
+            abs->exp = subst(abs->exp, j, c-1, sub);
             return to_ref(abs);
         }
     default:
@@ -718,25 +717,19 @@ ref_t subst(ref_t exp, int j, int c, ref_t sub)
     }
 }
 
-
-int is_val(ref_t term)
-{
-    return get_tag(term) == tabs;
-}
-
-int is_beta_redex(ref_t term)
+int is_beta_redex(struct ctx *ctx, ref_t term)
 {
     return get_tag(term) == tapp &&
         get_tag(to_app(term)->fun) == tabs;
 }
 
-ref_t beta(ref_t term)
+ref_t beta_reduce(struct ctx *ctx, ref_t term)
 {
     struct app *app = to_app(term);
     struct abs *abs = to_abs(app->fun);
-    app->arg = shift(app->arg, 1, 0);
-    abs->exp = subst(abs->exp, 1, 0, app->arg);
-    term = shift(abs->exp, -1, 0);
+    app->arg = shift(app->arg, -1, 0);
+    abs->exp = subst(abs->exp, -1, 0, app->arg);
+    term = shift(abs->exp, 1, 0);
     free(abs);
     discard(app->arg);
     free(app);
@@ -745,12 +738,11 @@ ref_t beta(ref_t term)
 
 int is_delta_redex(struct ctx *ctx, ref_t term)
 {
-    int idx = to_var(term);
-    struct bind *bind = get_bind(ctx, idx);
-    return !is_tnil(bind->def);
+    return get_tag(term) == tvar &&
+        !is_tnil(get_bind(ctx, to_var(term))->def);
 }
 
-ref_t delta(struct ctx *ctx, ref_t term)
+ref_t delta_reduce(struct ctx *ctx, ref_t term)
 {
     int idx = to_var(term);
     struct bind *bind = get_bind(ctx, idx);
@@ -759,28 +751,95 @@ ref_t delta(struct ctx *ctx, ref_t term)
     return sub;
 }
 
+int is_val(struct ctx *ctx, ref_t term)
+{
+    return get_tag(term) == tabs;
+}
+
+int have_weak_head_redex(struct ctx *ctx, ref_t term)
+{
+    return is_delta_redex(ctx, term) || is_beta_redex(ctx, term);
+}
+
+int have_head_redex(struct ctx *ctx, ref_t term)
+{
+    if (have_weak_head_redex(ctx, term))
+        return 1;
+    switch (get_tag(term)) {
+    case tvar:
+    case tapp:
+        return 0;
+    case tabs: 
+        {
+            push_bind(ctx, to_abs(term)->pos);
+            int ret = have_head_redex(ctx, term);
+            pop_bind(ctx);
+            return ret;
+        }
+    default:
+        bug();
+    }
+}
+
+int have_redex(struct ctx *ctx, ref_t term)
+{
+    if (have_weak_head_redex(ctx, term))
+        return 1;
+    switch (get_tag(term)) {
+    case tvar:
+        return 0;
+    case tabs:
+        {
+            push_bind(ctx, to_abs(term)->pos);
+            int ret = have_redex(ctx, to_abs(term)->exp);
+            pop_bind(ctx);
+            return ret;
+        }
+    case tapp:
+        return have_redex(ctx, to_app(term)->fun) &&
+            have_redex(ctx, to_app(term)->arg);
+    default:
+        bug();
+    }
+}
+
+enum eval_red {
+    eval_beta    = 1<<0,
+    eval_delta   = 1<<1,
+};
+
+enum eval_order {
+    eval_cbv,
+    eval_cvn,
+};
+
+enum eval_goal {
+    eval_weak_head_normal,
+    eval_head_normal,
+    eval_normal,
+};
+
 ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
 {
     switch (get_tag(term)) {
     case tvar:
+        if (is_delta_redex(ctx, term)) {
+            debug(" -> E-DELTA");
+            term = delta_reduce(ctx, term);
+            return term;
+        }
     case tabs:
         debug(" -> [no rule]\n");
         longjmp(jb, 1);
     case tapp:
         {
             struct app *app = to_app(term);
-            if (get_tag(app->fun) == tabs && is_val(app->arg)) {
-                debug(" -> E-APPABS");
-                struct abs *abs = to_abs(app->fun);
-                app->arg = shift(app->arg, 1, 0);
-                abs->exp = subst(abs->exp, 1, 0, app->arg);
-                term = shift(abs->exp, -1, 0);
-                free(abs);
-                discard(app->arg);
-                free(app);
+            if (is_beta_redex(ctx, term) && is_val(ctx, app->arg)) {
+                debug(" -> E-BETA");
+                term = beta_reduce(ctx, term);
                 return term;
-            } else if (is_val(app->fun)) {
-                debug(" -> E-APP2");
+            } else if (is_val(ctx, app->fun)){
+                debug(" -> E->APP2");
                 app->arg = eval1(ctx, app->arg, jb);
                 return to_ref(app);
             } else {
@@ -788,6 +847,8 @@ ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
                 app->fun = eval1(ctx, app->fun, jb);
                 return to_ref(app);
             }
+            debug(" -> [no rule]\n");
+            longjmp(jb, 1);
         }
     default:
         bug();
@@ -808,47 +869,6 @@ ref_t eval(struct ctx *ctx, ref_t term, jmp_buf jb)
         debug("\n");
     }
     return term;
-}
-
-int equal(struct ctx *ctx, ref_t pair[2], jmp_buf jb)
-{
-    int m;
-    while (1) {
-        /* raw value identity */
-        if (pair[0].raw == pair[1].raw)
-            return 1;
-        enum tag tag0 = get_tag(pair[0]);
-        enum tag tag1 = get_tag(pair[1]);
-        m = tag0 > tag1;
-
-        if (tag0 == tag1 && tag0 == tabs) {
-            push_bind(ctx, to_abs(pair[m])->pos);
-            ref_t exps[2] = {to_abs(pair[0])->exp, to_abs(pair[1])->exp};
-            int e = equal(ctx, exps, jb);
-            to_abs(pair[0])->exp = exps[0];
-            to_abs(pair[1])->exp = exps[1];
-            pop_bind(ctx);
-            return e;
-        }
-
-        if (is_delta_redex(ctx, pair[m])) {
-            pair[m] = delta(ctx, pair[m]);
-            continue;
-        }
-        if (is_delta_redex(ctx, pair[!m])) {
-            pair[!m] = delta(ctx, pair[!m]);
-            continue;
-        }
-        if (is_beta_redex(pair[m])) {
-            pair[m] = beta(pair[m]);
-            continue;
-        }
-        if (is_beta_redex(pair[!m])) {
-            pair[!m] = beta(pair[!m]);
-            continue;
-        }
-        return 0;
-    }
 }
 
 void dump_log(struct ctx *ctx)

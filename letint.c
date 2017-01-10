@@ -35,6 +35,8 @@ int interactive;
 union term;
 struct bind;
 
+typedef struct {jmp_buf mem;} frame_t;
+
 typedef struct {intptr_t raw;} ref_t;
 
 struct ctx {
@@ -44,7 +46,12 @@ struct ctx {
     FILE *buf;
     FILE *src;
     FILE *dst;
+    frame_t frm;
 };
+
+#define try(ctx) if (!setjmp(ctx->frm.mem))
+#define catch    else
+#define throw(ctx) longjmp(ctx->frm.mem, 1);
 
 struct bind {
     ref_t def;
@@ -347,7 +354,7 @@ void pop_bind(struct ctx *ctx)
 
 void discard(ref_t term);
 
-ref_t parse_term(struct ctx *ctx, jmp_buf jb);
+ref_t parse_term(struct ctx *ctx);
 
 #define append_log(ctx, ...) (fprintf((ctx)->log, "%lld:",save_pos(ctx)), fprintf((ctx)->log, __VA_ARGS__), NULL)
 
@@ -356,7 +363,7 @@ void reset_log(struct ctx *ctx)
     ctx->log = tmpfile();
 }
 
-ref_t parse_abs(struct ctx *ctx, jmp_buf jb)
+ref_t parse_abs(struct ctx *ctx)
 {
     char buf[lim_id_len];
     if (!match(ctx, "lambda")) {
@@ -368,12 +375,12 @@ ref_t parse_abs(struct ctx *ctx, jmp_buf jb)
     fpos_t pos = save_pos(ctx);
     if (!get_id(ctx, buf)) {
         append_log(ctx, "expected identifier\n");
-        longjmp(jb, 1);
+        throw(ctx);
     }
-    jmp_buf njb;
+    frame_t frm = ctx->frm;
     ref_t type = tnil;
     ref_t exp = tnil;
-    if (!setjmp(njb)) {
+    try(ctx) {
 #if 0
         if (!match(ctx, ":")) {
             append_log(ctx, "expected ':'\n");
@@ -386,24 +393,27 @@ ref_t parse_abs(struct ctx *ctx, jmp_buf jb)
 #endif
         if (!match(ctx, ".")) {
             append_log(ctx, "expected '.'\n");
-            longjmp(njb, 1);
+            throw(ctx);
         }
         push_bind(ctx, pos);
-        ref_t exp = parse_term(ctx, njb);
+        ref_t exp = parse_term(ctx);
         if (is_tnil(exp))
-            longjmp(njb, 1);
+            throw(ctx);
         struct abs *abs = malloc(tsize);
         abs->pos = pos;
         abs->exp = exp;
         pop_bind(ctx);
+        ctx->frm = frm;
         return to_ref(abs);
+    } catch {
+        discard(exp);
+        discard(type);
+        ctx->frm = frm;
+        throw(ctx);
     }
-    discard(exp);
-    discard(type);
-    longjmp(jb, 1);
 }
 
-ref_t parse_var(struct ctx *ctx, jmp_buf jb)
+ref_t parse_var(struct ctx *ctx)
 {
     char id[lim_id_len];
     skip_spaces(ctx);
@@ -418,12 +428,12 @@ ref_t parse_var(struct ctx *ctx, jmp_buf jb)
         restore_pos(ctx, pos);
         reset_log(ctx);
         append_log(ctx, "use of undeclared identifier '%s'\n", id);
-        longjmp(jb, 1);
+        throw(ctx);
     }
     return to_ref(idx);
 }
 
-ref_t parse_let(struct ctx *ctx, jmp_buf jb)
+ref_t parse_let(struct ctx *ctx)
 {
     char id[lim_id_len];
     if (!match(ctx, "let"))
@@ -433,25 +443,25 @@ ref_t parse_let(struct ctx *ctx, jmp_buf jb)
     fpos_t pos = save_pos(ctx);
     if (!get_id(ctx, id)) {
         append_log(ctx, "expected identifier\n");
-        longjmp(jb, 1);
+        throw(ctx)
     }
     if (!match(ctx, "=")) {
         append_log(ctx, "expected '='\n");
-        longjmp(jb, 1);
+        throw(ctx);
     }
+    frame_t frm = ctx->frm;
     ref_t sub = tnil;
     ref_t exp = tnil;
-    jmp_buf njb;
-    if (!setjmp(njb)) {
-        sub = parse_term(ctx, njb);
+    try(ctx) {
+        sub = parse_term(ctx);
         if (!sub.raw)
-            longjmp(njb, 1);
+            throw(ctx);
         if (!match(ctx, "in")) {
             append_log(ctx, "expected 'in'\n");
-            longjmp(njb, 1);
+            throw(ctx);
         }
         push_bind(ctx, pos);
-        exp = parse_term(ctx, njb);
+        exp = parse_term(ctx);
         pop_bind(ctx);
         struct app *app = malloc(tsize);
         struct abs *abs = malloc(tsize);
@@ -459,14 +469,17 @@ ref_t parse_let(struct ctx *ctx, jmp_buf jb)
         abs->pos = pos;
         app->fun = to_ref(abs);
         app->arg = sub;
+        ctx->frm = frm;
         return to_ref(app);
+    } catch {
+        discard(sub);
+        discard(exp);
+        ctx->frm = frm;
+        throw(ctx);
     }
-    discard(sub);
-    discard(exp);
-    longjmp(jb, 1);
 }
 
-ref_t parse_num(struct ctx *ctx, jmp_buf jb)
+ref_t parse_num(struct ctx *ctx)
 {
     int i = match_num(ctx);
     if (i < 0) {
@@ -476,21 +489,21 @@ ref_t parse_num(struct ctx *ctx, jmp_buf jb)
     return to_ref(i);
 }
 
-ref_t parse_fun(struct ctx *ctx, jmp_buf jb)
+ref_t parse_fun(struct ctx *ctx)
 {
     ref_t fun;
     if (match(ctx, "(")) {
-        fun = parse_term(ctx, jb);
+        fun = parse_term(ctx);
         if (!match(ctx, ")")) {
             append_log(ctx, "expected ')'\n");
-            longjmp(jb, 1);
+            throw(ctx);
         }
         goto success;
     }
-    fun = parse_let(ctx, jb);
+    fun = parse_let(ctx);
     if (!is_tnil(fun))
         goto success;
-    fun = parse_abs(ctx, jb);
+    fun = parse_abs(ctx);
     if (!is_tnil(fun))
         goto success;
 #if 0
@@ -498,7 +511,7 @@ ref_t parse_fun(struct ctx *ctx, jmp_buf jb)
     if (!is_tnil(fun))
         goto success;
 #endif
-    fun = parse_var(ctx, jb);
+    fun = parse_var(ctx);
     if (!is_tnil(fun))
         goto success;
     return tnil;
@@ -507,35 +520,40 @@ success:
     return fun;
 }
 
-ref_t parse_term(struct ctx *ctx, jmp_buf jb)
+ref_t parse_term(struct ctx *ctx)
 {
-    jmp_buf njb;
-    ref_t fun = parse_fun(ctx, jb);
+    ref_t fun = parse_fun(ctx);
     if (is_tnil(fun))
-        longjmp(jb, 1);
-    while (!setjmp(njb)) {
-        ref_t arg = parse_fun(ctx, njb);
-        if (is_tnil(arg)) {
-            reset_log(ctx);
-            return fun;
+        throw(ctx);
+    frame_t frm = ctx->frm;
+    try(ctx) {
+        while(1) {
+            ref_t arg = parse_fun(ctx);
+            if (is_tnil(arg)) {
+                reset_log(ctx);
+                ctx->frm = frm;
+                return fun;
+            }
+            struct app *app = malloc(tsize);
+            app->fun = fun;
+            app->arg = arg;
+            fun = to_ref(app);
         }
-        struct app *app = malloc(tsize);
-        app->fun = fun;
-        app->arg = arg;
-        fun = to_ref(app);
+    } catch {
+        discard(fun);
+        ctx->frm = frm;
+        throw(ctx);
     }
-    discard(fun);
-    longjmp(jb, 1);
 }
 
-ref_t parse(struct ctx *ctx, jmp_buf jb)
+ref_t parse(struct ctx *ctx)
 {
     fpos_t pos = save_pos(ctx);
     fpos_t len = ctx->len;
-    ref_t term = parse_term(ctx, jb);
+    ref_t term = parse_term(ctx);
     if (!match_eol(ctx)) {
         append_log(ctx, "unneed character at end of line\n");
-        longjmp(jb, 1);
+        throw(ctx);
     }
     return term;
 }
@@ -592,7 +610,8 @@ void print_term(ref_t term, struct ctx *ctx, int lapp)
                 print_term(app->fun, ctx, 1);
             }
             emit_str(ctx, " ");
-            if (get_tag(app->arg) == tapp || (get_tag(app->arg) == tabs && lapp)) {
+            if (get_tag(app->arg) == tapp ||
+                    (get_tag(app->arg) == tabs && lapp)) {
                 emit_str(ctx, "(");
                 print_term(app->arg, ctx, 0);
                 emit_str(ctx, ")");
@@ -759,13 +778,13 @@ ref_t delta(struct ctx *ctx, ref_t term)
     return sub;
 }
 
-ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
+ref_t eval1(struct ctx *ctx, ref_t term)
 {
     switch (get_tag(term)) {
     case tvar:
     case tabs:
         debug(" -> [no rule]\n");
-        longjmp(jb, 1);
+        throw(ctx);
     case tapp:
         {
             struct app *app = to_app(term);
@@ -781,11 +800,11 @@ ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
                 return term;
             } else if (is_val(app->fun)) {
                 debug(" -> E-APP2");
-                app->arg = eval1(ctx, app->arg, jb);
+                app->arg = eval1(ctx, app->arg);
                 return to_ref(app);
             } else {
                 debug(" -> E-APP1");
-                app->fun = eval1(ctx, app->fun, jb);
+                app->fun = eval1(ctx, app->fun);
                 return to_ref(app);
             }
         }
@@ -794,20 +813,24 @@ ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
     }
 }
 
-ref_t eval(struct ctx *ctx, ref_t term, jmp_buf jb)
+ref_t eval(struct ctx *ctx, ref_t term)
 {
-    jmp_buf njb;
-    while(!setjmp(njb)) {
-        if (debug_file) {
-            FILE *dst = ctx->dst;
-            ctx->dst = debug_file;
-            print(ctx, term);
-            ctx->dst = dst;
+    frame_t frm = ctx->frm;
+    try(ctx) {
+        while(1) {
+            if (debug_file) {
+                FILE *dst = ctx->dst;
+                ctx->dst = debug_file;
+                print(ctx, term);
+                ctx->dst = dst;
+            }
+            term = eval1(ctx, term);
+            debug("\n");
         }
-        term = eval1(ctx, term, njb);
-        debug("\n");
+    } catch {
+        ctx->frm = frm;
+        return term;
     }
-    return term;
 }
 
 int equal(struct ctx *ctx, ref_t pair[2], jmp_buf jb)
@@ -895,7 +918,7 @@ int main(int argc, char **argv)
         ref_t term = tnil;
         fpos_t pos = save_pos(&ctx);
         int len = ctx.len;
-        if (setjmp(jb)) {
+        if (setjmp(ctx.frm.mem)) {
             dump_log(&ctx);
             if (!interactive)
                 exit(1);
@@ -912,9 +935,9 @@ int main(int argc, char **argv)
         if (interactive)
             info("%s", console);
         read_line(&ctx);
-        term = parse(&ctx, jb);
+        term = parse(&ctx);
         debug("eval:\n");
-        term = eval(&ctx, term, jb);
+        term = eval(&ctx, term);
         debug("print:\n");
         print(&ctx, term);
     } while (interactive);

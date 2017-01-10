@@ -18,3 +18,5 @@ clean:
 
 preview : README.pdf
 	open $<
+
+omega: CFLAGS=-g

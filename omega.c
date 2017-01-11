@@ -16,10 +16,8 @@
 #define debug(...)  (debug_file && fprintf(debug_file, __VA_ARGS__))
 #define bug()       (error("%s:%d:%s() bug!\n", __FILE__, __LINE__, __func__))
 #define lim_id_len  32
-#define min_idx     (INT_MIN)
-#define max_idx     (INT_MAX)
-
-static_assert(sizeof(intptr_t) > sizeof(int), "pointer size is very small\n");
+#define min_idx     (INTPTR_MIN>>(CHAR_BIT*sizeof(intptr_t)/2))
+#define max_idx     (INTPTR_MAX>>(CHAR_BIT*sizeof(intptr_t)/2))
 
 #define prolog      "+---------------+\n"\
                     "| TAPLE chap 4. |\n"\
@@ -35,7 +33,7 @@ FILE *debug_file;
 int interactive;
 union term;
 struct bind;
-fpos_t name = -4;
+fpos_t name;
 
 typedef struct {intptr_t raw;} ref_t;
 typedef struct {jmp_buf jb;} frm_t;
@@ -91,34 +89,31 @@ enum tag {
     tapp,
     tarr,
     tval,
-
     tvar,
     tuniv,
     tnil,
 };
+static_assert(tval < alignof(union term), "num of reference tag exceed pointer align\n");
 
-#define is_nil(x) (((x).raw) == 0)
-#define nil (ref_t){0}
-#define univ (ref_t){1}
-#define is_univ(x) (((x).raw) == 1)
-#define tsize  sizeof(union term)
-#define talign alignof(union term)
-static_assert(tval < talign, "num of reference tag exceed pointer align\n");
+#define is_nil(x)   (((x).raw) == 0)
+#define nil         (ref_t){0}
+#define univ        (ref_t){1}
+#define is_univ(x)  (((x).raw) == 1)
+#define tsize       sizeof(union term)
+#define talign      alignof(union term)
 
-int to_int(ref_t ref)
-{
+static inline intptr_t to_int(ref_t ref) {
     return ref.raw;
 }
-#define to_var(x) to_int(x)
 
-void *to_ptr(ref_t ref)
-{
+static inline void *to_ptr(ref_t ref) {
     return (void *)(ref.raw & -talign);
 }
 
-#define to_abs(x) ((struct abs *)to_ptr(x))
-#define to_app(x) ((struct app *)to_ptr(x))
-#define to_arr(x) ((struct arr *)to_ptr(x))
+#define to_var(x)   to_int(x)
+#define to_abs(x)   ((struct abs *)to_ptr(x))
+#define to_app(x)   ((struct app *)to_ptr(x))
+#define to_arr(x)   ((struct arr *)to_ptr(x))
 
 #define to_ref(x) generic((x),\
     struct abs*:    (ref_t){(intptr_t)(x) | tabs},\
@@ -126,7 +121,7 @@ void *to_ptr(ref_t ref)
     struct arr*:    (ref_t){(intptr_t)(x) | tarr},\
     struct val*:    (ref_t){(intptr_t)(x) | tval},\
     int:            (ref_t){(intptr_t)(x)},\
-    default: nil)
+    default: (bug(),nil))
 
 enum tag get_tag(ref_t ref)
 {
@@ -394,7 +389,7 @@ ref_t parse_all(struct ctx *ctx, jmp_buf jb)
     if (!match(ctx, "forall"))
         return nil;
     if (!setjmp(njb)) {
-        debug("%*c%s\n", ctx->len, ' ', __func__);
+        debug("%*s%s\n", ctx->len, "", __func__);
         fpos_t pos = read_id(ctx, id);
         if (pos == EOF) {
             parse_log(ctx, "expected identifier\n");
@@ -481,7 +476,7 @@ ref_t parse_abs(struct ctx *ctx, jmp_buf jb)
         return nil;
     }
     if (!setjmp(njb)) {
-        debug("%*c%s\n", ctx->len, ' ', __func__);
+        debug("%*s%s\n", ctx->len, "", __func__);
         fpos_t pos = read_id(ctx, buf);
         if (pos == EOF) {
             parse_log(ctx, "expected identifier\n");
@@ -518,7 +513,7 @@ ref_t parse_var(struct ctx *ctx, jmp_buf jb)
         parse_log(ctx, "expected identifier\n");
         return nil;
     }
-    debug("%*c%s\n", ctx->len, ' ', __func__);
+    debug("%*s%s\n", ctx->len, "", __func__);
     int idx = find_bind_idx(ctx, id);
     if (!idx) {
         restore_pos(ctx, pos);
@@ -539,7 +534,7 @@ ref_t parse_let(struct ctx *ctx, jmp_buf jb)
     if (!match(ctx, "let"))
         return nil;
     if (!setjmp(njb)) {
-        debug("%*c%s\n", ctx->len, ' ', __func__);
+        debug("%*s%s\n", ctx->len, "", __func__);
         skip_spaces(ctx);
         fpos_t pos = read_id(ctx, id);
         if (pos == EOF) {
@@ -766,7 +761,16 @@ void print_term(ref_t term, struct ctx *ctx, int lapp)
 void print(struct ctx *ctx, ref_t term)
 {
     print_term(term, ctx, 0);
-    emit_str(ctx, "\n");
+}
+
+void print_debug(struct ctx *ctx, ref_t term)
+{
+    if (debug_file) {
+        FILE *dst = ctx->dst;
+        ctx->dst = debug_file;
+        print(ctx, term);
+        ctx->dst = dst;
+    }
 }
 
 ref_t shift(ref_t exp, int d, int c)
@@ -988,10 +992,10 @@ int have_redex(struct ctx *ctx, ref_t term)
 
 #define type_log(ctx, pos, ...) (fprintf((ctx)->log, "%lld:", pos), fprintf((ctx->log), __VA_ARGS__ ))
 
-int compare_type(struct ctx *ctx, ref_t t0, ref_t t1, jmp_buf jb)
+int type_eq(struct ctx *ctx, ref_t t0, ref_t t1, jmp_buf jb)
 {
     if (t0.raw == t1.raw)
-        return 0;
+        return 1;
     enum tag tag[2];
     tag[0] = get_tag(t0);
     tag[1] = get_tag(t1);
@@ -1006,25 +1010,25 @@ int compare_type(struct ctx *ctx, ref_t t0, ref_t t1, jmp_buf jb)
         }
     }
     if (tag[0] != tag[1])
-        return 1;
+        return 0;
     switch (tag[0]) {
         struct arr *arr0;
         struct arr *arr1;
     case tvar:
-        return 1;
+        return 0;
     case tuniv:
-        return 1;
+        return 0;
     case tarr:
         arr0 = to_arr(t0);
         arr1 = to_arr(t1);
-        return compare_type(ctx, arr0->src, arr1->src, jb) &&
-            compare_type(ctx, arr0->dst, arr1->dst, jb);
+        return type_eq(ctx, arr0->src, arr1->src, jb) &&
+            type_eq(ctx, arr0->dst, arr1->dst, jb);
     default:
         bug();
     }
 }
 
-ref_t check_type(struct ctx *ctx, ref_t term, jmp_buf jb)
+ref_t type_of(struct ctx *ctx, ref_t term, jmp_buf jb)
 {
     switch (get_tag(term)) {
         struct app *app;
@@ -1036,7 +1040,7 @@ ref_t check_type(struct ctx *ctx, ref_t term, jmp_buf jb)
             abs = to_abs(term);
             ref_t src = abs->type;
             push_bind(ctx, abs->pos, src, nil);
-            ref_t dst = check_type(ctx, abs->exp, jb);
+            ref_t dst = type_of(ctx, abs->exp, jb);
             if (is_nil(dst)) {
                 type_log(ctx, abs->pos, "typing expression in abstraction failed\n");
                 return nil;
@@ -1051,17 +1055,17 @@ ref_t check_type(struct ctx *ctx, ref_t term, jmp_buf jb)
         }
     case tapp:
         app = to_app(term);
-        ref_t funtype = check_type(ctx, app->fun, jb);
+        ref_t funtype = type_of(ctx, app->fun, jb);
         if (is_nil(funtype)) {
             type_log(ctx, app->pos, "typing function failed\n");
             return nil;
         }
-        ref_t src = check_type(ctx, app->arg, jb);
+        ref_t src = type_of(ctx, app->arg, jb);
         if (is_nil(src))
             return nil;
         if (get_tag(funtype) == tarr) {
             struct arr *arr = to_arr(funtype);
-            if (compare_type(ctx, arr->src, src, jb) == 0)
+            if (type_eq(ctx, arr->src, src, jb) == 0)
                 return arr->dst;
             type_log(ctx, app->pos,  "parameter type mismatch\n");
         } else {
@@ -1123,7 +1127,7 @@ ref_t eval1(struct ctx *ctx, ref_t term, jmp_buf jb)
             app->fun = eval1(ctx, app->fun, jb);
             return to_ref(app);
         }
-        debug(" -> [no rule]\n");
+        debug(" -> [no rule]");
         longjmp(jb, 1);
     default:
         bug();
@@ -1134,15 +1138,12 @@ ref_t eval(struct ctx *ctx, ref_t term, jmp_buf jb)
 {
     jmp_buf njb;
     while(!setjmp(njb)) {
-        if (debug_file) {
-            FILE *dst = ctx->dst;
-            ctx->dst = debug_file;
-            print(ctx, term);
-            ctx->dst = dst;
-        }
-        term = eval1(ctx, term, njb);
+        print_debug(ctx, term);
+        debug("\n");
+        eval1(ctx, term, jb);
         debug("\n");
     }
+    debug("\n");
     return term;
 }
 
@@ -1209,12 +1210,14 @@ int main(int argc, char **argv)
         read_line(&ctx);
         term = parse(&ctx, jb);
         debug("check:\n");
-        ref_t type = check_type(&ctx, term, jb);
-        print(&ctx, type);
+        ref_t type = type_of(&ctx, term, jb);
+        print_debug(&ctx, type);
+        debug("\n");
         debug("eval:\n");
         term = eval(&ctx, term, jb);
         debug("print:\n");
         print(&ctx, term);
+        emit_str(&ctx, "\n");
     } while (interactive);
     return 0;
 }

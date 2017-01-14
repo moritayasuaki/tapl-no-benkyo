@@ -1,9 +1,9 @@
 #!/bin/sh -e
 res=$(mktemp)
 
-./omega > $res << EOS
-lambda X. lambda x:X.x
+./omega -d > $res << EOS
+lambda X.lambda x:X.x
 EOS
 diff $res - << EOS
-lambda X. lambda x:X.x
+lambda X.lambda x:X.x
 EOS

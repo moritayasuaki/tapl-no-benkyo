@@ -12,7 +12,7 @@
 #define generic     _Generic
 #define info(...)   fprintf(stderr, __VA_ARGS__)
 #define warn(...)   fprintf(stderr, __VA_ARGS__)
-#define error(...)  (fprintf(stderr, __VA_ARGS__), exit(1))
+#define error(...)  (fprintf(stderr, __VA_ARGS__), exit(EXIT_FAILURE))
 #define debug(...)  (debug_file && fprintf(debug_file, __VA_ARGS__))
 #define bug()       (error("%s:%d:%s() bug!\n", __FILE__, __LINE__, __func__))
 #define LIM_ID_LEN  32
@@ -27,14 +27,18 @@
                     "|  good bye ;)  |\n"\
                     "+---------------+\n"
 
-#define CONSOLE     ">>> "
-
-#define ANOT        ":"
+#define PROMPT      ">>> "
+#define ANNOT       ":"
 #define DOT         "."
 #define ARROW       "->"
 #define UNIV        "*"
 #define LAMBDA      "fun"
 #define FORALL      "forall"
+#define DEFINE      "def"
+#define DECLARE     "decl"
+#define TYPEOF      "typeof"
+#define BASIS       10
+
 //#define LAMBDA      "lambda"
 //#define FORALL      "forall"
 //#define LAMBDA      u8"λ"
@@ -42,6 +46,7 @@
 
 FILE *debug_file;
 int interactive;
+int typeannotation;
 union term;
 struct bind;
 fpos_t name;
@@ -223,16 +228,17 @@ int peek_char(struct ctx *ctx)
     return undo_char(ctx, eat_char(ctx));
 }
 
-void emit(struct ctx *ctx, char *s)
+int emit(struct ctx *ctx, char *s)
 {
     if (!*s)
-        return;
+        return 0;
     if (!isspace(ctx->un) && !isspace(*s))
         if (is_idtail(*s) && is_idtail(ctx->un))
             fputc(' ', ctx->dst);
     while (*s)
         fputc(*s++, ctx->dst);
     ctx->un = *(s-1);
+    return *(s-1);
 }
 
 void skip_spaces(struct ctx *ctx)
@@ -317,10 +323,14 @@ int match(struct ctx *ctx, char *s)
 
 int is_keyword(char *id)
 {
-    return !strcmp(id, "in") ||
-        !strcmp(id, "let") ||
-        !strcmp(id, LAMBDA) ||
-        !strcmp(id, FORALL);
+    static char const *keyword[] = {
+        "in", "let", LAMBDA, FORALL, DEFINE, DECLARE, TYPEOF
+    };
+    int i = sizeof(keyword)/sizeof(*keyword);
+    while (i--)
+        if(!strcmp(id, keyword[i]))
+            return 1;
+    return 0;
 }
 
 struct bind *get_base(struct ctx *ctx)
@@ -415,7 +425,7 @@ void pop_bind(struct ctx *ctx)
 #define catch       else
 #define throw(ctx)  longjmp((ctx)->frm.mem, 1)
 
-void discard(ref_t term);
+ref_t discard(ref_t term);
 
 ref_t parse_term(struct ctx *ctx);
 ref_t parse_type(struct ctx *ctx);
@@ -468,14 +478,10 @@ ref_t parse_var(struct ctx *ctx)
     return to_ref(idx);
 }
 
-ref_t parse_anot(struct ctx *ctx)
+ref_t parse_annot(struct ctx *ctx)
 {
     fpos_t pos = save_pos(ctx);
-    if (match(ctx, ":=")) {
-        restore_pos(ctx, pos);
-        return nil;
-    }
-    maybe(ctx, ANOT);
+    maybe(ctx, ANNOT);
     debug_ctx(ctx, ">>%s\n", __func__);
     ref_t type = parse_term(ctx);
     debug_ctx(ctx, "<<%s\n", __func__);
@@ -492,7 +498,7 @@ ref_t parse_abs(struct ctx *ctx)
         debug_ctx(ctx, ">>%s\n", __func__);
         char id[LIM_ID_LEN];
         fpos_t pos = expect_id(ctx, id);
-        type = parse_anot(ctx);
+        type = parse_annot(ctx);
         if (is_nil(type))
             type = univ(1);
         expect(ctx, DOT);
@@ -525,7 +531,7 @@ ref_t parse_all(struct ctx *ctx)
         debug_ctx(ctx, ">>%s\n", __func__);
         char id[LIM_ID_LEN];
         fpos_t pos = expect_id(ctx, id);
-        src = parse_anot(ctx);
+        src = parse_annot(ctx);
         if (is_nil(src))
             src = univ(1);
         expect(ctx, DOT);
@@ -546,45 +552,6 @@ ref_t parse_all(struct ctx *ctx)
     throw(ctx);
 }
 
-ref_t parse_type1(struct ctx *ctx)
-{
-    ref_t type;
-    if (match(ctx, "(")) {
-        type = parse_type(ctx);
-        expect(ctx, ")");
-        return type;
-    }
-    type = parse_all(ctx);
-    if (!is_nil(type))
-        return type;
-    type = parse_var(ctx);
-    if (!is_nil(type))
-        return type;
-    return nil;
-}
-
-ref_t parse_type(struct ctx *ctx)
-{
-    ref_t type = parse_type1(ctx);
-    if (is_nil(type))
-        throw(ctx);
-    if (!match(ctx, ARROW))
-        return type;
-    push_bind(ctx, EOF, type, nil);
-    ref_t dst = parse_type(ctx);
-        return nil;
-    pop_bind(ctx);
-    if (is_nil(dst)) {
-        discard(type);
-        throw(ctx);
-    }
-    struct arr *arr = malloc(tsize);
-    arr->src = type;
-    arr->dst = dst;
-    arr->pos = EOF;
-    return to_ref(arr);
-}
-
 ref_t parse_let(struct ctx *ctx)
 {
     ref_t type = nil;
@@ -596,7 +563,7 @@ ref_t parse_let(struct ctx *ctx)
         debug_ctx(ctx, ">>%s\n", __func__);
         char id[LIM_ID_LEN];
         fpos_t pos = expect_id(ctx, id);
-        type = parse_anot(ctx);
+        type = parse_annot(ctx);
         expect(ctx, "=");
         sub = parse_term(ctx);
         if (is_nil(sub))
@@ -755,9 +722,9 @@ ref_t parse(struct ctx *ctx)
     return term;
 }
 
-void print_term(struct ctx *ctx, ref_t term, int lapp);
+int print_term(struct ctx *ctx, ref_t term, int lapp);
 
-void emit_id(struct ctx *ctx, fpos_t pos)
+int emit_id(struct ctx *ctx, fpos_t pos)
 {
     char buf[LIM_ID_LEN];
     if (pos < 0) {
@@ -767,77 +734,23 @@ void emit_id(struct ctx *ctx, fpos_t pos)
             buf[--i] = (-pos) % ('z' - 'a' + 1) + 'a';
             pos = pos/('z' - 'a' + 1);
         }
-        emit(ctx, &buf[i]);
+        return emit(ctx, &buf[i]);
     } else {
         fpos_t save = save_pos(ctx);
         restore_pos(ctx, pos);
         if (read_id(ctx, buf) == EOF)
             bug();
         restore_pos(ctx, save);
-        emit(ctx, buf);
+        return emit(ctx, buf);
     }
 }
 
-void print_var(struct ctx *ctx, int idx)
-{
-    struct bind *bind = get_bind(ctx, idx);
-    if (ctx->buf == NULL) {
-        char buf[LIM_ID_LEN];
-        sprintf(buf, "%d", -idx);
-        emit(ctx, buf);
-        return;
-    }
-    emit_id(ctx, bind->pos);
-}
-
-void print_abs(struct ctx *ctx, struct abs *abs)
-{
-    emit(ctx, LAMBDA);
-    if (ctx->buf)
-        emit_id(ctx, abs->pos);
-    emit(ctx, ANOT);
-    print_term(ctx, abs->type, 1);
-    emit(ctx, ".");
-    push_bind(ctx, abs->pos, abs->type, nil);
-    print_term(ctx, abs->exp, 0);
-    pop_bind(ctx);
-}
-
-void print_all(struct ctx *ctx, ref_t term) {
-    struct arr *arr = to_arr(term);
-    emit(ctx, FORALL);
-    if (ctx->buf)
-        emit_id(ctx, arr->pos);
-    emit(ctx, ANOT);
-    print_term(ctx, arr->src, 1);
-    emit(ctx, ".");
-    push_bind(ctx, arr->pos, univ(1), nil);
-    print_term(ctx, arr->dst, 0);
-    pop_bind(ctx);
-}
-
-void print_arr(struct ctx *ctx, ref_t term) {
-    struct arr *arr = to_arr(term);
-    if (get_tag(arr->src) == tarr) {
-        emit(ctx, "(");
-        print_term(ctx, arr->src, 0);
-        emit(ctx, ")");
-    } else {
-        print_term(ctx, arr->src, 0);
-    }
-    emit(ctx, ARROW);
-    push_bind(ctx, EOF, arr->src, nil);
-    print_term(ctx, arr->dst, 0);
-    pop_bind(ctx);
-}
-
-#define BASIS 10
 int to_digit(unsigned num)
 {
     return "0123456789abcdef"[num];
 }
 
-void print_num(struct ctx *ctx, unsigned num)
+int print_num(struct ctx *ctx, unsigned num)
 {
     char buf[LIM_ID_LEN];
     int i = LIM_ID_LEN;
@@ -850,42 +763,101 @@ void print_num(struct ctx *ctx, unsigned num)
         buf[--i] = to_digit(num % BASIS);
         num /= BASIS;
     } while (num);
-    emit(ctx, &buf[i]);
+    return emit(ctx, &buf[i]);
 }
 
-void print_univ(struct ctx *ctx, int level)
+int print_var(struct ctx *ctx, int idx)
 {
-    emit(ctx, UNIV);
-    if (level != 1)
-        print_num(ctx, level);
-}
-
-void print_term(struct ctx *ctx, ref_t term, int lapp)
-{
-    if (is_beta_redex(ctx, term)) {
-        struct app *app = to_app(term);
-        struct abs *abs = to_abs(app->fun);
-        if (is_nil(abs->type)) {
-            emit(ctx, "let");
-            if (ctx->buf)
-                emit_id(ctx, abs->pos);
-            emit(ctx, "=");
-            print_term(ctx, app->arg, 0);
-            emit(ctx, "in");
-            push_bind(ctx, abs->pos, abs->type, app->arg);
-            print_term(ctx, abs->exp, 0);
-            pop_bind(ctx);
-            return;
-        }
+    struct bind *bind = get_bind(ctx, idx);
+    if (ctx->buf == NULL) {
+        return print_num(ctx, -idx);
     }
+    return emit_id(ctx, bind->pos);
+}
+
+int print_abs(struct ctx *ctx, struct abs *abs)
+{
+    emit(ctx, LAMBDA);
+    if (ctx->buf)
+        emit_id(ctx, abs->pos);
+    emit(ctx, ANNOT);
+    print_term(ctx, abs->type, 1);
+    emit(ctx, ".");
+    push_bind(ctx, abs->pos, abs->type, nil);
+    int res = print_term(ctx, abs->exp, 0);
+    pop_bind(ctx);
+    return res;
+}
+
+int print_all(struct ctx *ctx, ref_t term) {
+    struct arr *arr = to_arr(term);
+    emit(ctx, FORALL);
+    if (ctx->buf)
+        emit_id(ctx, arr->pos);
+    emit(ctx, ANNOT);
+    print_term(ctx, arr->src, 1);
+    emit(ctx, ".");
+    push_bind(ctx, arr->pos, univ(1), nil);
+    int res = print_term(ctx, arr->dst, 0);
+    pop_bind(ctx);
+    return res;
+}
+
+int print_arr(struct ctx *ctx, ref_t term) {
+    struct arr *arr = to_arr(term);
+    if (get_tag(arr->src) == tarr) {
+        emit(ctx, "(");
+        print_term(ctx, arr->src, 0);
+        emit(ctx, ")");
+    } else {
+        print_term(ctx, arr->src, 0);
+    }
+    emit(ctx, ARROW);
+    push_bind(ctx, EOF, arr->src, nil);
+    int res = print_term(ctx, arr->dst, 0);
+    pop_bind(ctx);
+    return res;
+}
+
+
+int print_univ(struct ctx *ctx, int level)
+{
+    int res = emit(ctx, UNIV);
+    if (level != 1)
+        res = print_num(ctx, level);
+    return res;
+}
+
+int print_let(struct ctx *ctx, ref_t term)
+{
+    struct app *app = to_app(term);
+    struct abs *abs = to_abs(app->fun);
+    emit(ctx, "let");
+    if (ctx->buf)
+        emit_id(ctx, abs->pos);
+    if (!is_nil(abs->type)) {
+        emit(ctx, ":");
+        print_term(ctx, abs->type, 0);
+    }
+    emit(ctx, "=");
+    print_term(ctx, app->arg, 0);
+    emit(ctx, "in");
+    push_bind(ctx, abs->pos, abs->type, app->arg);
+    int res = print_term(ctx, abs->exp, 0);
+    pop_bind(ctx);
+    return res;
+}
+
+int print_term(struct ctx *ctx, ref_t term, int lapp)
+{
+    if (is_beta_redex(ctx, term))
+        return print_let(ctx, term);
     switch (get_tag(term)) {
         struct app *app;
     case tvar:
-        print_var(ctx, to_var(term));
-        return;
+        return print_var(ctx, to_var(term));
     case tabs:
-        print_abs(ctx, to_abs(term));
-        return;
+        return print_abs(ctx, to_abs(term));
     case tapp:
         app = to_app(term);
         if (get_tag(app->fun) == tabs) {
@@ -900,51 +872,48 @@ void print_term(struct ctx *ctx, ref_t term, int lapp)
         if (get_tag(app->arg) == tapp || (get_tag(app->arg) == tabs && lapp)) {
             emit(ctx, "(");
             print_term(ctx, app->arg, 0);
-            emit(ctx, ")");
-        } else {
-            print_term(ctx, app->arg, 0);
+            return emit(ctx, ")");
         }
-        return;
+        return print_term(ctx, app->arg, 0);
     case tarr:
         if (to_arr(term)->pos == EOF)
-            print_arr(ctx, term);
-        else
-            print_all(ctx, term);
-        return;
+            return print_arr(ctx, term);
+        return print_all(ctx, term);
     case tuniv:
-        print_univ(ctx, to_univ(term));
-        return;
+        return print_univ(ctx, to_univ(term));
     default:
         debug("%td\n", term.raw);
         bug();
     }
 }
 
-void print(struct ctx *ctx, ref_t term)
+int print(struct ctx *ctx, ref_t term)
 {
     print_term(ctx, term, 0);
-    emit(ctx, "\n");
+    return emit(ctx, "\n");
 }
 
-void print_debug(struct ctx *ctx, ref_t term)
+int print_debug(struct ctx *ctx, ref_t term)
 {
-    if (debug_file) {
-        FILE *dst = ctx->dst;
-        int un = ctx->un;
-        ctx->un = ' ';
-        ctx->dst = debug_file;
-        print(ctx, term);
-        ctx->un = un;
-        ctx->dst = dst;
-    }
+    if (!debug_file)
+        return 0;
+    FILE *dst = ctx->dst;
+    int un = ctx->un;
+    ctx->un = ' ';
+    ctx->dst = debug_file;
+    int ret = print(ctx, term);
+    ctx->un = un;
+    ctx->dst = dst;
+    return ret;
 }
 
-void print_debug_idx(struct ctx *ctx, ref_t term)
+int print_debug_idx(struct ctx *ctx, ref_t term)
 {
     FILE *buf = ctx->buf;
     ctx->buf = NULL;
-    print_debug(ctx, term);
+    int ret = print_debug(ctx, term);
     ctx->buf = buf;
+    return ret;
 }
 
 ref_t shift(ref_t exp, int d, int c)
@@ -1014,30 +983,30 @@ ref_t copy(ref_t term)
     }
 }
 
-void discard(ref_t term)
+ref_t discard(ref_t term)
 {
     if (is_nil(term))
-        return;
+        return nil;
     switch (get_tag(term)) {
     case tvar:
-        return;
+        return nil;
     case tabs:
         discard(to_abs(term)->exp);
         discard(to_abs(term)->type);
         free(to_abs(term));
-        return;
+        return nil;
     case tapp:
         discard(to_app(term)->fun);
         discard(to_app(term)->arg);
         free(to_app(term));
-        return;
+        return nil;
     case tarr:
         discard(to_arr(term)->src);
         discard(to_arr(term)->dst);
         free(to_arr(term));
-        return;
+        return nil;
     case tuniv:
-        return;
+        return nil;
     default:
         bug();
     }
@@ -1357,7 +1326,6 @@ ref_t eval1(struct ctx *ctx, ref_t term)
         ctx->frm = frm;
         return term;
     } catch try (ctx) {
-        throw(ctx);
         term = eval_delta(ctx, term);
         ctx->frm = frm;
         return term;
@@ -1406,6 +1374,8 @@ void dump_log(struct ctx *ctx)
 }
 
 struct ctx *define(struct ctx *ctx);
+struct ctx *declare(struct ctx *ctx);
+struct ctx *showtype(struct ctx *ctx);
 
 int main(int argc, char **argv)
 {
@@ -1424,7 +1394,7 @@ int main(int argc, char **argv)
                     warn("illegal option -- %c\n", *opt);
                 }
     }
-    struct ctx ctx = {
+    struct ctx base = {
         .len = 0,
         .src = stdin,
         .dst = stdout,
@@ -1433,89 +1403,130 @@ int main(int argc, char **argv)
         .top = NULL,
         .un = EOF
     };
+    struct ctx *ctx = &base;
     if (interactive)
         info("%s", PROLOG);
     do {
-        fpos_t pos = save_pos(&ctx);
-        int len = ctx.len;
-        try(&ctx) {
-            if (is_eof(ctx.src)) {
+        fpos_t pos = save_pos(ctx);
+        int len = ctx->len;
+        try(ctx) {
+            if (is_eof(ctx->src)) {
                 if (interactive)
                     info("%s", EPILOG);
-                exit(0);
+                exit(EXIT_SUCCESS);
             }
             if (interactive)
-                info("%s", CONSOLE);
-            read_line(&ctx);
-            if (define(&ctx)) {
-            } else {
-                debug("parse:\n");
-                ref_t tm = parse(&ctx);
-                print_debug_idx(&ctx, tm);
-                print(&ctx, tm);
-                debug("type:\n");
-                ref_t ty = type(&ctx, tm);
-                print_debug_idx(&ctx, ty);
-                print(&ctx, ty);
-                debug("eval:\n");
-                tm = eval(&ctx, tm);
-                print_debug_idx(&ctx, tm);
-                debug("print:\n");
-                print(&ctx, tm);
-            }
+                info("%s", PROMPT);
+            read_line(ctx);
+            if (define(ctx))
+                continue;
+            if (declare(ctx))
+                continue;
+            if (showtype(ctx))
+                continue;
+            debug("parse:\n");
+            ref_t tm = parse(ctx); print_debug_idx(ctx, tm);
+            print_debug(ctx, tm);
+            debug("type:\n");
+            ref_t ty = type(ctx, tm);
+            print_debug_idx(ctx, ty);
+            print_debug(ctx, ty);
+            debug("eval:\n");
+            tm = eval(ctx, tm);
+            print_debug_idx(ctx, tm);
+            debug("print:\n");
+            print(ctx, tm);
         } catch {
-            dump_log(&ctx);
+            dump_log(ctx);
             if (!interactive)
-                exit(1);
-            restore_pos(&ctx, pos);
-            ctx.len = len;
-            ctx.un = EOF;
+                exit(EXIT_FAILURE);
+            restore_pos(ctx, pos);
+            ctx->len = len;
+            ctx->un = EOF;
         }
     } while (interactive);
-    return 0;
+    exit(EXIT_FAILURE);
 }
+
+#define __expect_term(ctx, term) (is_nil(term)?(parse_log(ctx, "expected %s\n", #term), throw(ctx)):(void)0)
+#define expect_term(ctx, term) __expect_term(ctx, term)
 
 struct ctx *define(struct ctx *ctx)
 {
-    char id[LIM_ID_LEN];
     ref_t type = nil;
     ref_t def = nil;
-    ref_t anot = nil;
+    ref_t annot = nil;
     frm_t frm = ctx->frm;
-    if (!match(ctx, "def"))
+    if (!match(ctx, DEFINE))
         return NULL;
     try(ctx) {
-        fpos_t pos = read_id(ctx, id);
-        if (pos == EOF)
-            throw(ctx);
-        anot = parse_anot(ctx);
-        expect(ctx, ":=");
+        char id[LIM_ID_LEN];
+        fpos_t pos = expect_id(ctx, id);
+        annot = parse_annot(ctx);
+        expect(ctx, "=");
         def = parse_term(ctx);
-        if (is_nil(def))
-            throw(ctx);
-        expect(ctx, ";");
+        expect_term(ctx, def);
         ref_t type = type_term(ctx, def);
-        print_debug(ctx, type);
-        if (is_nil(type))
+        expect_term(ctx, type);
+        expect(ctx, ";");
+        if (is_nil(annot))
+            annot = copy(type);
+        if (!type_eq(ctx, type, annot))
             throw(ctx);
-        if (is_nil(anot))
-            anot = copy(type);
-        if (!type_eq(ctx, type, anot))
-            throw(ctx);
-        discard(anot);
+        discard(annot);
         emit_id(ctx, pos);
         emit(ctx, ":");
         print_term(ctx, type, 0);
-        emit(ctx, ":=");
-        print_term(ctx, def, 0);
-        emit(ctx, ";");
         emit(ctx, "\n");
         push_bind(ctx, pos, type, def);
+        ctx->frm = frm;
         return ctx;
     }
-    discard(anot);
+    discard(annot);
     discard(type);
     discard(def);
+    ctx->frm = frm;
+    throw(ctx);
+}
+
+struct ctx *declare(struct ctx *ctx)
+{
+    ref_t decl = nil;
+    frm_t frm = ctx->frm;
+    if (!match(ctx, DECLARE))
+        return NULL;
+    try(ctx) {
+        char id[LIM_ID_LEN];
+        fpos_t pos = expect_id(ctx, id);
+        decl = parse_annot(ctx);
+        expect_term(ctx, decl);
+        expect(ctx, ";");
+        emit_id(ctx, pos);
+        emit(ctx, ":");
+        print(ctx, decl);
+        push_bind(ctx, pos, decl, nil);
+        ctx->frm = frm;
+        return ctx;
+    }
+    discard(decl);
+    ctx->frm = frm;
+    throw(ctx);
+}
+
+struct ctx *showtype(struct ctx *ctx)
+{
+    ref_t ty = nil;
+    ref_t tm = nil;
+    frm_t frm = ctx->frm;
+    if (!match(ctx, TYPEOF))
+        return NULL;
+    try(ctx) {
+        tm = parse(ctx);
+        ty = type(ctx, tm);
+        print(ctx, ty);
+    }
+    discard(tm);
+    discard(ty);
     ctx->frm = frm;
     throw(ctx);
 }

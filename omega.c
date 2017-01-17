@@ -21,7 +21,7 @@
 
 #define PROLOG\
     "+----------------------------------------+\n"\
-    "|           Welcome to System F          |\n"\
+    "|       Welcome to System F Omega        |\n"\
     "+----------------------------------------+\n"
 
 #define EPILOG\
@@ -1486,7 +1486,7 @@ struct ctx *define(struct ctx *ctx)
                 annot = copy(type);
             if (!type_eq(ctx, type, annot))
                 throw(ctx);
-            discard(annot);
+            annot = discard(annot);
             emit_id(ctx, pos);
             print_annot(ctx, type);
             emit(ctx, "\n");
@@ -1501,4 +1501,3 @@ struct ctx *define(struct ctx *ctx)
     ctx->frm = frm;
     throw(ctx);
 }
-

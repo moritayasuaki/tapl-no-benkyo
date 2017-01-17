@@ -19,25 +19,29 @@
 #define MIN_IDX     (INTPTR_MIN>>(CHAR_BIT*sizeof(intptr_t)/2))
 #define MAX_IDX     (INTPTR_MAX>>(CHAR_BIT*sizeof(intptr_t)/2))
 
-#define PROLOG      "+---------------+\n"\
-                    "| TAPLE chap 4. |\n"\
-                    "+---------------+\n"
+#define PROLOG\
+    "+----------------------------------------+\n"\
+    "|           Welcome to System F          |\n"\
+    "+----------------------------------------+\n"
 
-#define EPILOG      "+---------------+\n"\
-                    "|  good bye ;)  |\n"\
-                    "+---------------+\n"
+#define EPILOG\
+    "+----------------------------------------+\n"\
+    "|           Good bye! \\(^o^)/            |\n"\
+    "+----------------------------------------+\n"
 
 #define PROMPT      ">>> "
 #define ANNOT       ":"
 #define DOT         "."
 #define ARROW       "->"
-#define UNIV        "*"
+#define KIND        "*"
 #define LAMBDA      "fun"
 #define FORALL      "forall"
 #define DEFINE      "def"
 #define DECLARE     "decl"
-#define TYPEOF      "typeof"
 #define BASIS       10
+static const char * const keyword[] = {
+    "in", "let", LAMBDA, FORALL, DEFINE, DECLARE
+};
 
 //#define LAMBDA      "lambda"
 //#define FORALL      "forall"
@@ -110,14 +114,14 @@ enum tag {
     tarr,
     tval,
     tvar,
-    tuniv,
+    tkind,
 };
 
 static_assert(tval < alignof(union term), "num of reference tag exceed pointer align\n");
 
 #define is_nil(x)   (((x).raw) == 0)
 #define nil         (ref_t){0}
-#define univ(n)     (assert(n>0),(ref_t){n})
+#define kind(n)     (assert(n>0),(ref_t){n})
 #define tsize       sizeof(union term)
 #define talign      alignof(union term)
 
@@ -130,10 +134,13 @@ static inline void *to_ptr(ref_t ref) {
 }
 
 #define to_var(x)   to_int(x)
-#define to_univ(x)  to_int(x)
+#define to_kind(x)  to_int(x)
 #define to_abs(x)   ((struct abs *)to_ptr(x))
 #define to_app(x)   ((struct app *)to_ptr(x))
 #define to_arr(x)   ((struct arr *)to_ptr(x))
+
+#define __expect_term(ctx, term) (is_nil(term)?(parse_log(ctx, "expected %s\n", #term), throw(ctx)):(void)0)
+#define expect_term(ctx, term) __expect_term(ctx, term)
 
 #define to_ref(x) generic((x),\
     struct abs*:    (ref_t){(intptr_t)(x) | tabs},\
@@ -147,7 +154,7 @@ int is_var(ref_t ref) {
     return MIN_IDX <= ref.raw && ref.raw < 0;
 }
 
-int is_univ(ref_t ref) {
+int is_kind(ref_t ref) {
     return 0 < ref.raw && ref.raw <= MAX_IDX;
 }
 
@@ -155,8 +162,8 @@ enum tag get_tag(ref_t ref)
 {
     if (is_nil(ref))
         bug();
-    if (is_univ(ref))
-        return tuniv;
+    if (is_kind(ref))
+        return tkind;
     if (is_var(ref))
         return tvar;
     return ref.raw & ~-talign;
@@ -262,10 +269,10 @@ int match_eos(struct ctx *ctx)
     return 0;
 }
 
-int read_num(struct ctx *ctx)
+int parse_nat(struct ctx *ctx)
 {
     int c;
-    intptr_t i;
+    int i;
     fpos_t save = save_pos(ctx);
     c = eat_char(ctx);
     if (!isdigit(c)) {
@@ -320,17 +327,13 @@ int match(struct ctx *ctx, char *s)
     return match_str(ctx, s);
 }
 
-
-int is_keyword(char *id)
+const char * is_keyword(char *id)
 {
-    static char const *keyword[] = {
-        "in", "let", LAMBDA, FORALL, DEFINE, DECLARE, TYPEOF
-    };
     int i = sizeof(keyword)/sizeof(*keyword);
     while (i--)
         if(!strcmp(id, keyword[i]))
-            return 1;
-    return 0;
+            return keyword[i];
+    return NULL;
 }
 
 struct bind *get_base(struct ctx *ctx)
@@ -338,7 +341,7 @@ struct bind *get_base(struct ctx *ctx)
     return ctx->top + ctx->len;
 }
 
-fpos_t read_id(struct ctx *ctx, char *id)
+fpos_t parse_id(struct ctx *ctx, char *id)
 {
     skip_spaces(ctx);
     char *p = id;
@@ -424,6 +427,7 @@ void pop_bind(struct ctx *ctx)
 #define try(ctx)    if(!setjmp((ctx)->frm.mem))
 #define catch       else
 #define throw(ctx)  longjmp((ctx)->frm.mem, 1)
+#define until(cond) while(!(cond))
 
 ref_t discard(ref_t term);
 
@@ -432,6 +436,7 @@ ref_t parse_type(struct ctx *ctx);
 ref_t parse_var(struct ctx *ctx);
 
 #define parse_log(ctx, ...) (fprintf((ctx)->log, "%lld:",save_pos(ctx)), fprintf((ctx)->log, __VA_ARGS__))
+#define parse_err(ctx, ...) (parse_log(ctx, __VA_ARGS__), throw(ctx))
 #define print_log(ctx, ...) (fprintf((ctx)->log, __VA_ARGS__))
 
 void reset_log(struct ctx *ctx)
@@ -444,19 +449,15 @@ void reset_log(struct ctx *ctx)
 int is_beta_redex(struct ctx *ctx, ref_t term);
 
 fpos_t expect_id(struct ctx *ctx, char *id) {
-    fpos_t pos = read_id(ctx, id);
-    if (pos == EOF) {
-        parse_log(ctx, "expected identifier\n");
-        throw(ctx);
-    }
+    fpos_t pos = parse_id(ctx, id);
+    if (pos == EOF)
+        parse_err(ctx, "expected identifier\n");
     return pos;
 }
 
 void expect(struct ctx *ctx, char *tok) {
-    if (!match(ctx, tok)) {
-        parse_log(ctx, "expected '%s'\n", tok);
-        throw(ctx);
-    }
+    if (!match(ctx, tok))
+        parse_err(ctx, "expected '%s'\n", tok);
 }
 #define maybe(ctx, tok)\
     if (!match(ctx, tok)) return nil
@@ -464,16 +465,13 @@ void expect(struct ctx *ctx, char *tok) {
 ref_t parse_var(struct ctx *ctx)
 {
     char id[LIM_ID_LEN];
-    fpos_t pos = read_id(ctx, id);
+    fpos_t pos = parse_id(ctx, id);
     if (pos == EOF)
         return nil;
     debug_ctx(ctx, ">>%s\n", __func__);
     int idx = find_bind_idx(ctx, id);
-    if (!idx) {
-        restore_pos(ctx, pos);
-        parse_log(ctx, "use of undeclared identifier '%s'\n", id);
-        throw(ctx);
-    }
+    if (!idx)
+        parse_err(ctx, "use of undeclared identifier '%s'\n", id);
     debug_ctx(ctx, "<<%s\n", __func__);
     return to_ref(idx);
 }
@@ -500,7 +498,7 @@ ref_t parse_abs(struct ctx *ctx)
         fpos_t pos = expect_id(ctx, id);
         type = parse_annot(ctx);
         if (is_nil(type))
-            type = univ(1);
+            type = kind(1);
         expect(ctx, DOT);
         push_bind(ctx, pos, type, nil);
         exp = parse_term(ctx);
@@ -533,7 +531,7 @@ ref_t parse_all(struct ctx *ctx)
         fpos_t pos = expect_id(ctx, id);
         src = parse_annot(ctx);
         if (is_nil(src))
-            src = univ(1);
+            src = kind(1);
         expect(ctx, DOT);
         push_bind(ctx, pos, src, nil);
         dst = parse_term(ctx);
@@ -566,8 +564,7 @@ ref_t parse_let(struct ctx *ctx)
         type = parse_annot(ctx);
         expect(ctx, "=");
         sub = parse_term(ctx);
-        if (is_nil(sub))
-            throw(ctx);
+        expect_term(ctx, sub);
         expect(ctx, "in");
         push_bind(ctx, pos, type, nil);
         exp = parse_term(ctx);
@@ -591,30 +588,16 @@ ref_t parse_let(struct ctx *ctx)
     throw(ctx);
 }
 
-ref_t parse_univ(struct ctx *ctx)
+ref_t parse_kind(struct ctx *ctx)
 {
-    maybe(ctx, UNIV);
+    maybe(ctx, KIND);
     debug_ctx(ctx, ">>%s\n", __func__);
-    int num = read_num(ctx);
-    ref_t u;
-    if (num <= 0)
-        u = univ(1);
-    else
-        u = univ(num);
+    int nat = parse_nat(ctx);
+    if (nat <= 0)
+        nat = 1;
+    ref_t u = kind(nat);
     debug_ctx(ctx, "<<%s\n", __func__);
     return u;
-}
-
-ref_t parse_num(struct ctx *ctx)
-{
-    fpos_t save = save_pos(ctx);
-    int num = read_num(ctx);
-    if (num < 0) {
-        parse_log(ctx, "expected number\n");
-        restore_pos(ctx, save);
-        return nil;
-    }
-    return to_ref(num);
 }
 
 ref_t parse_fun(struct ctx *ctx)
@@ -634,7 +617,7 @@ ref_t parse_fun(struct ctx *ctx)
     fun = parse_all(ctx);
     if (!is_nil(fun))
         return fun;
-    fun = parse_univ(ctx);
+    fun = parse_kind(ctx);
     if (!is_nil(fun))
         return fun;
     fun = parse_var(ctx);
@@ -701,24 +684,14 @@ ref_t parse_term(struct ctx *ctx)
 }
 
 ref_t type_term(struct ctx *ctx, ref_t term);
+int refcnt(ref_t exp, int j, int c);
 
 ref_t parse(struct ctx *ctx)
 {
     fpos_t pos = save_pos(ctx);
     fpos_t len = ctx->len;
     ref_t term = parse_term(ctx);
-    if (interactive) {
-        if (!match_eos(ctx)) {
-            parse_log(ctx, "unneed character at end of line\n");
-            throw(ctx);
-        }
-    } else {
-        skip_spaces(ctx);
-        if (!is_eof(ctx->buf)) {
-            parse_log(ctx, "unneed character at end of file\n");
-            throw(ctx);
-        }
-    }
+    expect(ctx, ";");
     return term;
 }
 
@@ -738,7 +711,7 @@ int emit_id(struct ctx *ctx, fpos_t pos)
     } else {
         fpos_t save = save_pos(ctx);
         restore_pos(ctx, pos);
-        if (read_id(ctx, buf) == EOF)
+        if (parse_id(ctx, buf) == EOF)
             bug();
         restore_pos(ctx, save);
         return emit(ctx, buf);
@@ -775,13 +748,18 @@ int print_var(struct ctx *ctx, int idx)
     return emit_id(ctx, bind->pos);
 }
 
+int print_annot(struct ctx *ctx, ref_t term)
+{
+    emit(ctx, ANNOT);
+    return print_term(ctx, term, 0);
+}
+
 int print_abs(struct ctx *ctx, struct abs *abs)
 {
     emit(ctx, LAMBDA);
     if (ctx->buf)
         emit_id(ctx, abs->pos);
-    emit(ctx, ANNOT);
-    print_term(ctx, abs->type, 1);
+    print_annot(ctx, abs->type);
     emit(ctx, ".");
     push_bind(ctx, abs->pos, abs->type, nil);
     int res = print_term(ctx, abs->exp, 0);
@@ -789,29 +767,26 @@ int print_abs(struct ctx *ctx, struct abs *abs)
     return res;
 }
 
-int print_all(struct ctx *ctx, ref_t term) {
-    struct arr *arr = to_arr(term);
+int print_all(struct ctx *ctx, struct arr *arr) {
     emit(ctx, FORALL);
     if (ctx->buf)
         emit_id(ctx, arr->pos);
-    emit(ctx, ANNOT);
-    print_term(ctx, arr->src, 1);
+    if (!(is_kind(arr->src) && to_kind(arr->src) == 1))
+        print_annot(ctx, arr->src);
     emit(ctx, ".");
-    push_bind(ctx, arr->pos, univ(1), nil);
+    push_bind(ctx, arr->pos, arr->src, nil);
     int res = print_term(ctx, arr->dst, 0);
     pop_bind(ctx);
     return res;
 }
 
-int print_arr(struct ctx *ctx, ref_t term) {
-    struct arr *arr = to_arr(term);
-    if (get_tag(arr->src) == tarr) {
-        emit(ctx, "(");
-        print_term(ctx, arr->src, 0);
-        emit(ctx, ")");
-    } else {
-        print_term(ctx, arr->src, 0);
-    }
+int print_arr(struct ctx *ctx, struct arr *arr) {
+    if (refcnt(arr->dst, -1, 0))
+        return print_all(ctx, arr);
+    int lassoc = get_tag(arr->src) == tarr;
+    lassoc && emit(ctx, "(");
+    print_term(ctx, arr->src, 0);
+    lassoc && emit(ctx, ")");
     emit(ctx, ARROW);
     push_bind(ctx, EOF, arr->src, nil);
     int res = print_term(ctx, arr->dst, 0);
@@ -819,10 +794,9 @@ int print_arr(struct ctx *ctx, ref_t term) {
     return res;
 }
 
-
-int print_univ(struct ctx *ctx, int level)
+int print_kind(struct ctx *ctx, int level)
 {
-    int res = emit(ctx, UNIV);
+    int res = emit(ctx, KIND);
     if (level != 1)
         res = print_num(ctx, level);
     return res;
@@ -876,11 +850,9 @@ int print_term(struct ctx *ctx, ref_t term, int lapp)
         }
         return print_term(ctx, app->arg, 0);
     case tarr:
-        if (to_arr(term)->pos == EOF)
-            return print_arr(ctx, term);
-        return print_all(ctx, term);
-    case tuniv:
-        return print_univ(ctx, to_univ(term));
+        return print_arr(ctx, to_arr(term));
+    case tkind:
+        return print_kind(ctx, to_kind(term));
     default:
         debug("%td\n", term.raw);
         bug();
@@ -943,7 +915,7 @@ ref_t shift(ref_t exp, int d, int c)
         arr->src = shift(arr->src, d, c);
         arr->dst = shift(arr->dst, d, c-1);
         return to_ref(arr);
-    case tuniv:
+    case tkind:
         return exp;
     default:
         bug();
@@ -976,7 +948,7 @@ ref_t copy(ref_t term)
         arr->src = copy(to_arr(term)->src);
         arr->dst = copy(to_arr(term)->dst);
         return to_ref(arr);
-    case tuniv:
+    case tkind:
         return term;
     default:
         bug();
@@ -1005,8 +977,31 @@ ref_t discard(ref_t term)
         discard(to_arr(term)->dst);
         free(to_arr(term));
         return nil;
-    case tuniv:
+    case tkind:
         return nil;
+    default:
+        bug();
+    }
+}
+
+int refcnt(ref_t exp, int j, int c)
+{
+    switch (get_tag(exp)) {
+    case tvar:
+        if (to_var(exp) == j+c)
+            return 1;
+        return 0;
+    case tapp:
+        return refcnt(to_app(exp)->fun, j, c)
+            + refcnt(to_app(exp)->arg, j, c);
+    case tabs:
+        return refcnt(to_abs(exp)->type, j, c)
+            + refcnt(to_abs(exp)->exp, j, c-1);
+    case tarr:
+        return refcnt(to_arr(exp)->src, j, c)
+            + refcnt(to_arr(exp)->dst, j, c-1);
+    case tkind:
+        return 0;
     default:
         bug();
     }
@@ -1042,7 +1037,7 @@ ref_t subst(ref_t exp, int j, int c, ref_t sub)
         arr->src = subst(arr->src, j, c, sub);
         arr->dst = subst(arr->dst, j, c-1, sub);
         return to_ref(arr);
-    case tuniv:
+    case tkind:
         return exp;
     default:
         bug();
@@ -1142,6 +1137,7 @@ int have_redex(struct ctx *ctx, ref_t term)
 }
 
 #define type_log(ctx, pos, ...) (fprintf((ctx)->log, "%lld:", pos), fprintf((ctx->log), __VA_ARGS__ ))
+#define type_err(ctx, pos, ...) (type_log(ctx, pos, __VA_ARGS__), throw(ctx))
 
 int type_eq(struct ctx *ctx, ref_t t0, ref_t t1)
 {
@@ -1151,14 +1147,10 @@ int type_eq(struct ctx *ctx, ref_t t0, ref_t t1)
     tag[0] = get_tag(t0);
     tag[1] = get_tag(t1);
     for (int i = 0; i < 2; i++) {
-        if (tag[i] == tabs) {
-            type_log(ctx, to_abs(t0)->pos,  "abstraction is not allowed in type context\n");
-            throw(ctx);
-        }
-        if (tag[i] == tapp) {
-            type_log(ctx, to_abs(t0)->pos,  "application is not allowed in type context\n");
-            throw(ctx);
-        }
+        if (tag[i] == tabs)
+            type_err(ctx, to_abs(t0)->pos,  "abstraction is not allowed in type context\n");
+        if (tag[i] == tapp)
+            type_err(ctx, to_abs(t0)->pos,  "application is not allowed in type context\n");
     }
     if (tag[0] != tag[1])
         return 0;
@@ -1167,7 +1159,7 @@ int type_eq(struct ctx *ctx, ref_t t0, ref_t t1)
         struct arr *arr1;
     case tvar:
         return 0;
-    case tuniv:
+    case tkind:
         return 0;
     case tarr:
         arr0 = to_arr(t0);
@@ -1191,18 +1183,17 @@ ref_t type_var(struct ctx *ctx, ref_t term)
     return tyvar;
 }
 
-
-ref_t type_abs(struct ctx *ctx, ref_t term)
+ref_t type_abs(struct ctx *ctx, struct abs *abs)
 {
-    struct abs *abs = to_abs(term);
     debug_ctx(ctx, ">>%s\n", __func__);
     ref_t tyarg = abs->type;
+    ref_t tyty = type_term(ctx, abs->type);
+    if (is_nil(tyty))
+        type_err(ctx, abs->pos, "is not type");
     push_bind(ctx, abs->pos, tyarg, nil);
     ref_t tyexp = type_term(ctx, abs->exp);
-    if (is_nil(tyexp)) {
-        type_log(ctx, abs->pos, "type error\n");
-        throw(ctx);
-    }
+    if (is_nil(tyexp))
+        type_err(ctx, abs->pos, "type error\n");
     pop_bind(ctx);
     struct arr *arr = malloc(tsize);
     arr->src = tyarg;
@@ -1212,28 +1203,22 @@ ref_t type_abs(struct ctx *ctx, ref_t term)
     return to_ref(arr);
 }
 
-ref_t type_app(struct ctx *ctx, ref_t term)
+ref_t type_app(struct ctx *ctx, struct app *app)
 {
     debug_ctx(ctx, ">>%s\n", __func__);
-    struct app* app = to_app(term);
     ref_t tyfun = type_term(ctx, app->fun);
-    if (is_nil(tyfun)) {
-        type_log(ctx, app->pos, "function type check failed\n");
-        throw(ctx);
-    }
+    if (get_tag(tyfun) != tarr)
+        type_err(ctx, app->pos, "function type check failed\n");
     ref_t tyarg = type_term(ctx, app->arg);
-    if (is_nil(tyarg)) {
-        type_log(ctx, app->pos, "parameter type check failed\n");
-        throw(ctx);
-    }
-    if (get_tag(tyfun) != tarr) {
-        type_log(ctx, app->pos, "expected arrow type\n");
-        throw(ctx);
-    }
+    if (is_nil(tyarg))
+        type_err(ctx, app->pos, "parameter type check failed\n");
     struct arr *arr = to_arr(tyfun);
     if (!type_eq(ctx, arr->src, tyarg)) {
-        type_log(ctx, app->pos,  "parameter type mismatch\n");
-        throw(ctx);
+        print_debug(ctx, tyfun);
+        print_debug(ctx, arr->src);
+        print_debug(ctx, app->arg);
+        print_debug(ctx, tyarg);
+        type_err(ctx, app->pos,  "parameter type mismatch\n");
     }
     ref_t arg = copy(app->arg);
     ref_t type = copy(arr->dst);
@@ -1250,21 +1235,34 @@ ref_t type_let(struct ctx *ctx, ref_t term)
     struct app *app = to_app(term);
     struct abs *abs = to_abs(app->fun);
     debug_ctx(ctx, ">>%s\n", __func__);
-    if (is_nil(abs->type)) {
+    if (is_nil(abs->type))
         abs->type = type_term(ctx, app->arg);
-    }
     debug_ctx(ctx, "<<%s\n", __func__);
-    return type_app(ctx, term);
+    return type_app(ctx, app);
 }
 
-ref_t type_univ(struct ctx *ctx, ref_t term)
+ref_t type_kind(struct ctx *ctx, ref_t term)
 {
-    return univ(to_univ(term)+1);
+    return kind(to_kind(term)+1);
 }
 
-ref_t type_arr(struct ctx *ctx, ref_t term)
+ref_t type_arr(struct ctx *ctx, struct arr *arr)
 {
-    return univ(1);
+    debug_ctx(ctx, ">>%s\n", __func__);
+    ref_t tysrc = type_term(ctx, arr->src);
+    if (!is_kind(tysrc))
+        type_err(ctx, arr->pos, "expexted kind\n");
+    push_bind(ctx, arr->pos, arr->src, nil);
+    ref_t tydst = type_term(ctx, arr->dst);
+    if (!is_kind(tydst))
+        type_err(ctx, arr->pos, "expexted kind\n");
+    pop_bind(ctx);
+    int usrc = to_kind(tysrc) - 1;
+    int udst = to_kind(tydst);
+    if (usrc < udst)
+        return to_ref(udst);
+    else
+        return to_ref(usrc);
 }
 
 ref_t type_term(struct ctx *ctx, ref_t term)
@@ -1275,13 +1273,13 @@ ref_t type_term(struct ctx *ctx, ref_t term)
     case tvar:
         return type_var(ctx, term);
     case tabs:
-        return type_abs(ctx, term);
+        return type_abs(ctx, to_abs(term));
     case tapp:
-        return type_app(ctx, term);
+        return type_app(ctx, to_app(term));
     case tarr:
-        return type_arr(ctx, term);
-    case tuniv:
-        return type_univ(ctx, term);
+        return type_arr(ctx, to_arr(term));
+    case tkind:
+        return type_kind(ctx, term);
     default:
         bug();
     }
@@ -1347,13 +1345,12 @@ ref_t eval1(struct ctx *ctx, ref_t term)
 ref_t eval(struct ctx *ctx, ref_t term)
 {
     frm_t frm = ctx->frm;
-    try(ctx) {
-        while(1) {
+    try(ctx)
+        while (1) {
             print_debug(ctx, term);
             term = eval1(ctx, term);
             debug("\n");
         }
-    }
     debug("\n");
     ctx->frm = frm;
     return term;
@@ -1375,7 +1372,7 @@ void dump_log(struct ctx *ctx)
 
 struct ctx *define(struct ctx *ctx);
 struct ctx *declare(struct ctx *ctx);
-struct ctx *showtype(struct ctx *ctx);
+struct ctx *repl(struct ctx *ctx);
 
 int main(int argc, char **argv)
 {
@@ -1410,32 +1407,15 @@ int main(int argc, char **argv)
         fpos_t pos = save_pos(ctx);
         int len = ctx->len;
         try(ctx) {
-            if (is_eof(ctx->src)) {
-                if (interactive)
-                    info("%s", EPILOG);
-                exit(EXIT_SUCCESS);
-            }
             if (interactive)
                 info("%s", PROMPT);
             read_line(ctx);
+            if (is_eof(ctx->src))
+                break;
             if (define(ctx))
                 continue;
-            if (declare(ctx))
+            if (repl(ctx))
                 continue;
-            if (showtype(ctx))
-                continue;
-            debug("parse:\n");
-            ref_t tm = parse(ctx); print_debug_idx(ctx, tm);
-            print_debug(ctx, tm);
-            debug("type:\n");
-            ref_t ty = type(ctx, tm);
-            print_debug_idx(ctx, ty);
-            print_debug(ctx, ty);
-            debug("eval:\n");
-            tm = eval(ctx, tm);
-            print_debug_idx(ctx, tm);
-            debug("print:\n");
-            print(ctx, tm);
         } catch {
             dump_log(ctx);
             if (!interactive)
@@ -1444,12 +1424,31 @@ int main(int argc, char **argv)
             ctx->len = len;
             ctx->un = EOF;
         }
-    } while (interactive);
-    exit(EXIT_FAILURE);
+    } until(is_eof(ctx->src));
+    if (interactive)
+        info("%s", EPILOG);
+    exit(EXIT_SUCCESS);
 }
 
-#define __expect_term(ctx, term) (is_nil(term)?(parse_log(ctx, "expected %s\n", #term), throw(ctx)):(void)0)
-#define expect_term(ctx, term) __expect_term(ctx, term)
+struct ctx *repl(struct ctx *ctx)
+{
+    debug("parse:\n");
+    ref_t tm = parse(ctx);
+    print_debug_idx(ctx, tm);
+    print_debug(ctx, tm);
+    debug("type:\n");
+    ref_t ty = type(ctx, tm);
+    print_debug_idx(ctx, ty);
+    print_debug(ctx, ty);
+    debug("eval:\n");
+    tm = eval(ctx, tm);
+    print_debug_idx(ctx, tm);
+    debug("print:\n");
+    print(ctx, tm);
+    discard(ty);
+    discard(tm);
+    return ctx;
+}
 
 struct ctx *define(struct ctx *ctx)
 {
@@ -1457,30 +1456,44 @@ struct ctx *define(struct ctx *ctx)
     ref_t def = nil;
     ref_t annot = nil;
     frm_t frm = ctx->frm;
-    if (!match(ctx, DEFINE))
+    fpos_t save = save_pos(ctx);
+    char id[LIM_ID_LEN];
+    fpos_t pos = parse_id(ctx, id);
+    if (pos == EOF || find_bind_idx(ctx, id)) {
+        restore_pos(ctx, pos);
         return NULL;
+    }
     try(ctx) {
-        char id[LIM_ID_LEN];
-        fpos_t pos = expect_id(ctx, id);
         annot = parse_annot(ctx);
-        expect(ctx, "=");
-        def = parse_term(ctx);
-        expect_term(ctx, def);
-        ref_t type = type_term(ctx, def);
-        expect_term(ctx, type);
-        expect(ctx, ";");
-        if (is_nil(annot))
-            annot = copy(type);
-        if (!type_eq(ctx, type, annot))
-            throw(ctx);
-        discard(annot);
-        emit_id(ctx, pos);
-        emit(ctx, ":");
-        print_term(ctx, type, 0);
-        emit(ctx, "\n");
-        push_bind(ctx, pos, type, def);
-        ctx->frm = frm;
-        return ctx;
+        if (!match(ctx, "=")) {
+            /* declare */
+            expect_term(ctx, annot);
+            expect(ctx, ";");
+            emit_id(ctx, pos);
+            print_annot(ctx, annot);
+            emit(ctx, "\n");
+            push_bind(ctx, pos, annot, nil);
+            ctx->frm = frm;
+            return ctx;
+        } else {
+            /* definition */
+            def = parse_term(ctx);
+            expect_term(ctx, def);
+            ref_t type = type_term(ctx, def);
+            expect_term(ctx, type);
+            expect(ctx, ";");
+            if (is_nil(annot))
+                annot = copy(type);
+            if (!type_eq(ctx, type, annot))
+                throw(ctx);
+            discard(annot);
+            emit_id(ctx, pos);
+            print_annot(ctx, type);
+            emit(ctx, "\n");
+            push_bind(ctx, pos, type, def);
+            ctx->frm = frm;
+            return ctx;
+        }
     }
     discard(annot);
     discard(type);
@@ -1489,44 +1502,3 @@ struct ctx *define(struct ctx *ctx)
     throw(ctx);
 }
 
-struct ctx *declare(struct ctx *ctx)
-{
-    ref_t decl = nil;
-    frm_t frm = ctx->frm;
-    if (!match(ctx, DECLARE))
-        return NULL;
-    try(ctx) {
-        char id[LIM_ID_LEN];
-        fpos_t pos = expect_id(ctx, id);
-        decl = parse_annot(ctx);
-        expect_term(ctx, decl);
-        expect(ctx, ";");
-        emit_id(ctx, pos);
-        emit(ctx, ":");
-        print(ctx, decl);
-        push_bind(ctx, pos, decl, nil);
-        ctx->frm = frm;
-        return ctx;
-    }
-    discard(decl);
-    ctx->frm = frm;
-    throw(ctx);
-}
-
-struct ctx *showtype(struct ctx *ctx)
-{
-    ref_t ty = nil;
-    ref_t tm = nil;
-    frm_t frm = ctx->frm;
-    if (!match(ctx, TYPEOF))
-        return NULL;
-    try(ctx) {
-        tm = parse(ctx);
-        ty = type(ctx, tm);
-        print(ctx, ty);
-    }
-    discard(tm);
-    discard(ty);
-    ctx->frm = frm;
-    throw(ctx);
-}

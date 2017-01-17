@@ -1,9 +1,9 @@
 #!/bin/sh -e
 res=$(mktemp)
 
-./omega -d > $res << EOS
-lambda X.lambda x:X.x
+./omega > $res << EOS
+selfApp = fun x: forall X.X->X. x (forall X.X->X) x;
 EOS
 diff $res - << EOS
-lambda X.lambda x:X.x
+selfApp:(forall X.X->X)->forall X.X->X
 EOS

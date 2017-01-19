@@ -18,3 +18,6 @@ clean:
 
 preview : README.pdf
 	open $<
+
+i% : %
+	PATH=./:$$PATH rlwrap $< -i

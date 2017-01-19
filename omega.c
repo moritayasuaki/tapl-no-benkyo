@@ -36,11 +36,9 @@
 #define KIND        "*"
 #define LAMBDA      "fun"
 #define FORALL      "forall"
-#define DEFINE      "def"
-#define DECLARE     "decl"
 #define BASIS       10
 static const char * const keyword[] = {
-    "in", "let", LAMBDA, FORALL, DEFINE, DECLARE
+    "in", "let", LAMBDA, FORALL
 };
 
 //#define LAMBDA      "lambda"
@@ -255,18 +253,6 @@ void skip_spaces(struct ctx *ctx)
         c = eat_char(ctx);
     } while (isspace(c));
     undo_char(ctx, c);
-}
-
-int match_eos(struct ctx *ctx)
-{
-    int c;
-    do {
-        c = eat_char(ctx);
-    } while (isspace(c));
-    if (c == '\0')
-        return 1;
-    undo_char(ctx, c);
-    return 0;
 }
 
 int parse_nat(struct ctx *ctx)
@@ -1221,7 +1207,7 @@ ref_t type_app(struct ctx *ctx, struct app *app)
         type_err(ctx, app->pos,  "parameter type mismatch\n");
     }
     ref_t arg = copy(app->arg);
-    ref_t type = copy(arr->dst);
+    ref_t type = arr->dst;
     arg = shift(arg, -1, 0);
     type = subst(type, -1, 0, arg);
     type = shift(type, 1, 0);

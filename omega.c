@@ -1276,17 +1276,6 @@ ref_t type(struct ctx *ctx, ref_t term)
     return type_term(ctx, term);
 }
 
-enum eval_order {
-    eval_cbv,
-    eval_cvn,
-};
-
-enum eval_goal {
-    eval_weak_head_normal,
-    eval_head_normal,
-    eval_normal,
-};
-
 ref_t eval1(struct ctx *ctx, ref_t term)
 {
     frm_t frm = ctx->frm;
@@ -1357,7 +1346,6 @@ void dump_log(struct ctx *ctx)
 }
 
 struct ctx *define(struct ctx *ctx);
-struct ctx *declare(struct ctx *ctx);
 struct ctx *repl(struct ctx *ctx);
 
 int main(int argc, char **argv)

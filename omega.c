@@ -91,11 +91,10 @@ struct arr {
     fpos_t pos;
 };
 
-struct val {
-    ref_t (*parse)(struct ctx *);
-    void (*print)(struct ctx *, ref_t);
-    ref_t (*type)(struct ctx *, ref_t);
-    ref_t (*eval)(struct ctx *, ref_t);
+struct mu {
+    ref_t type;
+    ref_t exp;
+    fpos_t pos;
 };
 
 union term {
@@ -103,7 +102,6 @@ union term {
     struct abs abs;
     struct app app;
     struct arr arr;
-    struct val val;
 };
 
 enum tag {

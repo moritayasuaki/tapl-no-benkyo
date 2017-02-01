@@ -12,6 +12,7 @@
 #define lim_id_len  32
 FILE *debug_file;
 char *interactive;
+char *srcname;
 union term;
 struct bind;
 enum tag {tabs, tapp, tvar};
@@ -116,10 +117,18 @@ int emit_str(struct ctx *ctx, char *str)
 void skip_spaces(struct ctx *ctx)
 {
     int c;
-    do {
-        c = eat_char(ctx);
-    } while (isspace(c));
-    undo_char(ctx, c);
+    while (1) {
+        do {
+            c = eat_char(ctx);
+        } while (isspace(c));
+        if (c != '#') {
+            undo_char(ctx, c);
+            return;
+        }
+        do {
+           c = eat_char(ctx);
+        } while (c != '\n');
+    }
 }
 
 int match_eol(struct ctx *ctx)
@@ -664,26 +673,31 @@ int main(int argc, char **argv)
     jmp_buf jb;
     for (int i = 1; i < argc; i++) {
         char *opt = argv[i];
-        if (*opt++ == '-')
-            while (*opt)
-                switch (*opt++) {
-                case 'i':
-                    interactive = ">>> ";
-                    break;
-                case 'd':
-                    debug_file = stderr;
-                    break;
-                default:
-                    warn("illegal option -- %c", *opt);
-                }
+        if (opt[0] == '-')
+            switch (opt[1]) {
+            case 'f':
+                srcname = argv[++i];
+                break;
+            default:
+                for (int j = 1; opt[j]; j++)
+                    switch (opt[j]) {
+                    case 'i':
+                        interactive = ">>> ";
+                        break;
+                    case 'd':
+                        debug_file = stderr;
+                        break;
+                    default:
+                        warn("illegal option -- %c", *opt);
+                    }
+            }
     }
     ctx.len = 0;
-    ctx.src = stdin;
+    ctx.src = srcname?fopen(srcname,"r"):stdin;
     ctx.dst = stdout;
     ctx.log = tmpfile();
     ctx.buf = tmpfile();
     ctx.top = NULL;
-
 loop:
     debug("loop :\n");
     union term *term;
@@ -708,7 +722,7 @@ loop:
     term = eval(&ctx, term, jb);
     debug("print :\n");
     print(&ctx, term);
-    if (interactive && !iseof(stdin))
+    if (interactive && !iseof(ctx.src))
         goto loop;
     return 0;
 }
